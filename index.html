@@ -127,6 +127,10 @@ window.pluggyConnecting=false;window.pluggyMsg='';
   if(authIsAdmin)offerLegacyImport();
   // Os dados bancários podem ter até 24h de atraso na origem.
   if(me.bankLinks>0) setTimeout(()=>{if(authToken&&!window.pluggyBusy)sincronizarMeuPluggy()},900);
+  if(new URLSearchParams(location.search).has('pluggy_retorno')){
+   const url=new URL(location.href);url.searchParams.delete('pluggy_retorno');history.replaceState(null,'',url.pathname+url.search+url.hash);
+   pluggyRetornoOAuth();
+  }
  }catch(e){authToken='';sessionStorage.removeItem(SESSION_KEY);throw e;}
 }
 async function performLogin(event){
@@ -207,6 +211,7 @@ async function logoutUser(){
  if(dirty||saveInProgress){clearTimeout(saveTimer);await flushSave();for(let n=0;n<40&&saveInProgress;n++)await new Promise(r=>setTimeout(r,50));}
  if(dirty||saveInProgress||saveConflict){alert('Existem alterações sem salvar. Exporte o backup JSON antes de sair.');return;}
  try{await apiRequest('/auth/logout',{method:'POST'})}catch{}
+ pluggyLimparPendente();
  authToken='';authUser='';authDisplayName='';authIsAdmin=false;document.getElementById('manageUsersButton').hidden=true;S=normalizeS({});window.pluggySessionCode='';window.pluggyConnections=[];sessionStorage.removeItem(SESSION_KEY);
  document.body.classList.add('auth-locked');document.getElementById('loginScreen').hidden=false;document.getElementById('loginPassword').value='';
 }
@@ -311,6 +316,7 @@ function pluggyPanel(){
  <button class="btn" id="pluggyConnect" onclick="pluggyConectarBanco()" ${window.pluggyConnecting?'disabled':''}>🏦 ${window.pluggyConnecting?'Abrindo...':'Conectar banco'}</button>
  <button class="btn s" id="pluggySync" onclick="sincronizarMeuPluggy()" ${window.pluggyBusy?'disabled':''}>↻ ${window.pluggyBusy?'Sincronizando...':'Sincronizar meu banco'}</button>
  <p class="rec-hint">Conexões autorizadas neste perfil: <b>${(window.pluggyConnections||[]).length}</b>. Cada titular precisa autorizar seus próprios bancos na Pluggy.</p>
+ <button class="btn s" onclick="pluggyDiagnosticarManual()">🔎 Consultar erro de conexão</button>
  <button class="btn s" onclick="pluggyBackup()">⬇ Backup JSON</button>
  ${window.pluggyMsg?`<div class="rec-status" role="status">${E(window.pluggyMsg)}</div>`:''}
  ${pluggySaldosCard()}
@@ -332,29 +338,107 @@ function pluggySdk() {
  }).catch(err=>{window.pluggySdkPromise=null;throw err});
  return window.pluggySdkPromise;
 }
+// Os retornos OAuth não provam sucesso: sempre validamos o Item no Worker.
+const PLUGGY_PENDING_PREFIX='mcf_pluggy_tentativa_';
+const pluggyPendingKey=()=>PLUGGY_PENDING_PREFIX+authUser;
+const pluggyUuid=id=>/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(String(id||''));
+function pluggyLembrarItem(id){
+ if(!authToken||!pluggyUuid(id))return;
+ sessionStorage.setItem(pluggyPendingKey(),JSON.stringify({itemId:id,criadoEm:Date.now()}));
+}
+function pluggyPendente(){
+ try{
+  const dado=JSON.parse(sessionStorage.getItem(pluggyPendingKey())||'null');
+  if(dado && Date.now()-dado.criadoEm<30*60*1000 && pluggyUuid(dado.itemId))return dado.itemId;
+ }catch(_){ }
+ return '';
+}
+function pluggyLimparPendente(){sessionStorage.removeItem(pluggyPendingKey());}
+async function pluggyConfirmarItem(id){
+ if(!pluggyUuid(id))throw new Error('Identificador bancário inválido.');
+ await apiRequest('/pluggy/connections',{method:'POST',body:JSON.stringify({itemId:id})});
+ const linked=await apiRequest('/pluggy/connections');
+ window.pluggyConnections=linked.items||[];
+ pluggyLimparPendente();
+ window.pluggyMsg='Banco conectado ao seu perfil! Você já pode sincronizar os lançamentos.';
+ go();
+ await sincronizarMeuPluggy();
+}
+async function pluggyConsultarItem(id,confirmarSeAtualizado=false){
+ if(!authToken||!pluggyUuid(id))return;
+ try{
+  const d=await apiRequest('/pluggy/diagnostico',{method:'POST',body:JSON.stringify({itemId:id})});
+  // Não cadastrar conexões só porque a pessoa voltou da autorização.
+  if(confirmarSeAtualizado && d.status==='UPDATED'){
+   await pluggyConfirmarItem(id);
+   return;
+  }
+  window.pluggyMsg='Resultado Pluggy: '+d.status+' / '+d.executionStatus+'. Referência para suporte: '+d.itemId+'.'+
+   (d.status==='UPDATING'?' A conexão ainda está sendo processada.':'');
+ }catch(e){window.pluggyMsg='Não foi possível consultar a conexão: '+e.message;}
+ go();
+}
+async function pluggyDiagnosticarManual(){
+ if(!authToken)return;
+ const id=prompt('Informe o código Item ID mostrado na tela de erro da Pluggy (sem CPF, senha ou outros dados):','');
+ if(id===null)return;
+ if(!pluggyUuid(id.trim()))return alert('O Item ID deve ter o formato de um identificador UUID.');
+ pluggyLembrarItem(id.trim());
+ await pluggyConsultarItem(id.trim(),false);
+}
+async function pluggyRetornoOAuth(){
+ if(!authToken)return;
+ tab='rec';recModo='pluggy';
+ const id=pluggyPendente();
+ window.pluggyMsg=id
+  ? 'O navegador retornou do banco. Verificando o resultado na Pluggy...'
+  : 'Você retornou do banco. A autorização ainda precisa ser confirmada pela Pluggy. Se aparecer um código de erro, use “Consultar erro de conexão”.';
+ go();
+ if(id)await pluggyConsultarItem(id,true);
+}
+window.addEventListener('message',e=>{
+ if(e.origin!==location.origin || e.data?.type!=='mcf-pluggy-oauth-return')return;
+ pluggyRetornoOAuth();
+});
 async function pluggyConectarBanco(){
  if(!authToken || window.pluggyConnecting)return;
  window.pluggyConnecting=true;
  window.pluggyMsg='Preparando uma conexão segura...';go();
  try{
   const loggedToken=authToken;
+  pluggyLimparPendente(); // Não reaproveitar Item ID de uma tentativa anterior.
   const out=await apiRequest('/pluggy/connect-token',{method:'POST',body:'{}'});
   await pluggySdk();
   const widget=new window.PluggyConnect({
    connectToken:out.connectToken,
    includeSandbox:false,
+   forceOauthInBrowser:true,
+   onEvent:payload=>{
+    // A versão 2.x envia {event,item}; o Item ID não é uma credencial.
+    if(authToken!==loggedToken)return;
+    if(pluggyUuid(payload?.item?.id))pluggyLembrarItem(payload.item.id);
+   },
    onSuccess:async ({item})=>{
     try{
      if(!authToken||loggedToken!==authToken)throw new Error('A sessão mudou. Entre novamente.');
-     if(!item?.id)throw new Error('A Pluggy não retornou a referência da conexão.');
-     await apiRequest('/pluggy/connections',{method:'POST',body:JSON.stringify({itemId:item.id})});
-     const linked=await apiRequest('/pluggy/connections');
-     window.pluggyConnections=linked.items||[];
-     window.pluggyMsg='Banco conectado ao seu perfil! Você pode sincronizar agora.';
-     if(authToken)await sincronizarMeuPluggy();
+     if(!pluggyUuid(item?.id))throw new Error('A Pluggy não retornou a referência da conexão.');
+     pluggyLembrarItem(item.id);
+     await pluggyConfirmarItem(item.id);
     }catch(e){window.pluggyMsg='Conexão não confirmada: '+e.message;go();}
    },
-   onError:({message})=>{window.pluggyMsg='A conexão não foi concluída: '+String(message||'verifique a autorização no banco.');go();}
+   onError:async error=>{
+    if(authToken!==loggedToken)return;
+    const id=error?.data?.item?.id || pluggyPendente();
+    const msg=String(error?.message || 'Falha após a autorização no banco.').slice(0,200);
+    if(pluggyUuid(id)){
+     pluggyLembrarItem(id);
+     await pluggyConsultarItem(id,false);
+     window.pluggyMsg=msg+' '+window.pluggyMsg;
+    }else{
+     window.pluggyMsg=msg+' Não foi fornecido um Item ID. Consulte o código mostrado na janela de erro da Pluggy.';
+    }
+    go();
+   }
   });
   widget.init();
   window.pluggyMsg='Conclua a autorização na janela oficial da Pluggy.';
