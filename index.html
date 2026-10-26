@@ -48,24 +48,156 @@ nav.bt button.on{color:var(--g);font-weight:700}
 .rec-field label{margin:0 0 4px}
 .rec-hint{color:var(--mu);font-size:13px;margin:8px 0}
 .rec-status{font-size:13px;border-radius:10px;padding:10px;margin:10px 0;background:var(--bs)}
+#mainAdd[hidden]{display:none!important}
 .bank-mini{display:flex;justify-content:space-between;gap:10px;align-items:center;border-bottom:1px solid var(--bd);padding:10px 0;font-size:14px}
 .bank-mini:last-of-type{border-bottom:0}
 @media(max-width:760px){aside{display:none}nav.bt{display:flex}.bl{grid-template-columns:90px 1fr 80px}}
 
-</style></head><body>
+
+/* A plataforma só aparece após o login autenticado no Worker. */
+body.auth-locked aside,body.auth-locked main,body.auth-locked nav.bt{display:none!important}
+.login-screen{position:fixed;inset:0;z-index:90;background:linear-gradient(150deg,#0d3526,#0f6b41);display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto}
+.login-screen[hidden]{display:none!important}
+.login-box{width:100%;max-width:425px;border-radius:20px;padding:28px;background:var(--card);color:var(--tx);box-shadow:0 16px 55px #0004}
+.login-mark{font-size:32px;margin-bottom:6px}.login-box h1{font-size:24px;margin:0 0 6px}.login-box p{color:var(--mu);font-size:14px;margin:4px 0 14px}
+.login-box label{font-size:13px;margin:12px 0 5px}.login-box select,.login-box input{min-height:44px;width:100%}
+.login-box button{width:100%;margin-top:16px;min-height:44px}
+.login-box details{border-top:1px solid var(--bd);margin-top:20px;padding-top:16px}
+.login-box summary{font-size:13px;cursor:pointer;color:var(--mu)}
+.login-error{font-size:13px;padding:10px;background:var(--rs);color:var(--r);border-radius:10px;margin-top:12px}
+#loginMessage:empty{display:none}.session-pill{font-size:13px;color:var(--mu);white-space:nowrap}
+@media(max-width:760px){.login-box{padding:22px}.session-pill{display:none}}
+</style></head><body class="auth-locked">
+
+<section id="loginScreen" class="login-screen" aria-label="Autenticação do Meu Controle Financeiro">
+ <div class="login-box">
+  <div class="login-mark">💚</div><h1>Meu Controle Financeiro</h1>
+  <p>Entre no seu espaço pessoal. Cada perfil tem lançamentos e conexão bancária separados.</p>
+  <form id="loginForm">
+   <label for="loginWho">Quem está entrando?</label>
+   <select id="loginWho" required><option value="leandro">Leandro</option><option value="ray">Ray</option></select>
+   <label for="loginPassword">Senha do seu perfil</label>
+   <input id="loginPassword" type="password" minlength="12" autocomplete="current-password" required placeholder="Sua senha pessoal">
+   <button class="btn" type="submit" id="loginButton">Entrar no meu controle</button>
+  </form>
+  <div id="loginMessage" aria-live="polite"></div>
+  <details><summary>Primeira utilização: criar os acessos</summary>
+    <p>O administrador cadastra Leandro e Ray uma única vez. A chave de configuração é definida como segredo no Cloudflare.</p>
+    <form id="setupForm">
+      <label for="setupWho">Criar perfil de</label>
+      <select id="setupWho"><option value="leandro">Leandro</option><option value="ray">Ray</option></select>
+      <label for="setupPassword">Nova senha (mínimo de 12 caracteres)</label>
+      <input id="setupPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
+      <label for="setupKey">Chave de configuração (SETUP_KEY)</label>
+      <input id="setupKey" type="password" autocomplete="off" required>
+      <button type="submit" class="btn s">Criar acesso protegido</button>
+    </form>
+  </details>
+ </div>
+</section>
 <aside><h1>💚 Meu Controle Financeiro</h1><div id="sn"></div></aside>
-<main><header><h2 id="ti"></h2><input type="month" id="ym"><button class="btn" onclick="addAny()">+ Adicionar</button></header><div id="v"></div></main>
+<main><header><h2 id="ti"></h2><span id="sessionName" class="session-pill"></span><button class="btn s" onclick="logoutUser()" title="Sair do perfil">Sair</button><input type="month" id="ym"><button class="btn" id="mainAdd" onclick="addAny()">+ Adicionar</button></header><div id="v"></div></main>
 <nav class="bt" id="bn"></nav><div id="m"><div id="mb"></div></div>
 <script>
-const KEY="mcf_v1";
+const KEY="mcf_v1"; // Legado local: não será importado automaticamente para a Ray.
 const def=()=>({rec:[],fix:[],var:[],car:[],cmp:[],div:[],res:[]});
-let S;try{S=Object.assign(def(),JSON.parse(localStorage.getItem(KEY))||{})}catch(e){S=def()}
+const normalizeS=data=>{
+ const a=Object.assign(def(),data&&typeof data==='object'?data:{});
+ for(const k of ['rec','fix','var','car','cmp','div','res','pluggyIgnorados','pluggyVinculos','pluggySaldos','pluggyNeutros','pluggyAvisos'])if(!Array.isArray(a[k]))a[k]=[];
+ return a;
+};
+let S=normalizeS({}); // Somente os dados da conta autenticada são carregados.
+const API_BASE='https://meu-controle-financeiro-api.leandrocmrg001.workers.dev';
+let authToken='',authUser='',stateRevision=0,saveTimer=null,saveInProgress=false,dirty=false,saveConflict=false;
+const SESSION_KEY='mcf_auth_token';
+async function apiRequest(path,options={}){
+ const headers={'Content-Type':'application/json',...(authToken?{'Authorization':'Bearer '+authToken}:{}),...(options.headers||{})};
+ let response;
+ try{response=await fetch(API_BASE+path,{...options,headers,cache:'no-store'});}catch{throw new Error('Não foi possível alcançar o Cloudflare. Verifique a conexão.');}
+ let out={};try{out=await response.json();}catch{}
+ if(!response.ok)throw new Error(out.error||('Erro HTTP '+response.status));
+ return out;
+}
+function showLoginError(err){const box=document.getElementById('loginMessage');box.textContent=String(err?.message||err||'');box.className='login-error';}
+async function authActivate(token){
+ authToken=token;
+ try{
+  const me=await apiRequest('/auth/me');
+  const stored=await apiRequest('/state');
+  S=normalizeS(stored.data);stateRevision=stored.revision||0;
+  authUser=me.user?.login||'';saveConflict=false;dirty=false;
+  sessionStorage.setItem(SESSION_KEY,token);
+  document.body.classList.remove('auth-locked');document.getElementById('loginScreen').hidden=true;
+  document.getElementById('sessionName').textContent=me.user?.nome||'';
+  window.pluggySessionCode='logado';window.pluggyUltimaConsulta=0;window.pluggyMsg='';
+  go();
+  // Nunca importa os dados antigos do navegador sem autorização explícita.
+  if(authUser==='leandro')offerLegacyImport();
+  // Os dados bancários podem ter até 24h de atraso na origem.
+  if(me.bankLinks>0||authUser==='leandro')setTimeout(()=>{if(authToken&&!window.pluggyBusy)sincronizarMeuPluggy()},900);
+ }catch(e){authToken='';sessionStorage.removeItem(SESSION_KEY);throw e;}
+}
+async function performLogin(event){
+ event.preventDefault();const btn=document.getElementById('loginButton');btn.disabled=true;
+ try{
+  const r=await apiRequest('/auth/login',{method:'POST',body:JSON.stringify({login:document.getElementById('loginWho').value,password:document.getElementById('loginPassword').value})});
+  document.getElementById('loginPassword').value='';await authActivate(r.token);
+ }catch(e){showLoginError(e)}finally{btn.disabled=false;}
+}
+async function performSetup(event){
+ event.preventDefault();
+ try{
+  const r=await apiRequest('/auth/setup',{method:'POST',headers:{'X-Setup-Key':document.getElementById('setupKey').value},body:JSON.stringify({login:document.getElementById('setupWho').value,password:document.getElementById('setupPassword').value})});
+  document.getElementById('setupPassword').value='';document.getElementById('setupKey').value='';await authActivate(r.token);
+ }catch(e){showLoginError(e)}
+}
+function offerLegacyImport(){
+ if(!localStorage.getItem(KEY)||S.__legacyImported)return;
+ let legacy;try{legacy=JSON.parse(localStorage.getItem(KEY));}catch{return;}
+ if(!legacy||![...(legacy.rec||[]),...(legacy.fix||[]),...(legacy.var||[])].length)return;
+ // Dados antigos permanecem no navegador; o usuário escolhe se quer migrar.
+ open_('<h3>Importar dados antigos do Leandro?</h3><p>Encontrei registros da versão anterior neste navegador. Eles NÃO foram incluídos na conta nova. Faça backup antes de importar.</p><button class="btn" onclick="importLegacyForLeandro()">Importar meus dados antigos</button> <button class="btn s" onclick="close_()">Agora não</button>');
+}
+function importLegacyForLeandro(){
+ if(authUser!=='leandro'||S.__legacyImported)return;
+ const raw=localStorage.getItem(KEY);let old;
+ try{old=normalizeS(JSON.parse(raw));}catch{return;}
+ if(!confirm('Confirma que estes registros são do Leandro? O histórico atual do perfil será substituído.'))return;
+ S=old;S.__legacyImported=true;save();close_();go();
+}
+async function flushSave(){
+ if(saveInProgress||!dirty||!authToken||saveConflict)return;
+ saveInProgress=true;dirty=false;
+ const snapshot=JSON.stringify(S);
+ try{
+  const result=await apiRequest('/state',{method:'PUT',body:JSON.stringify({revision:stateRevision,data:JSON.parse(snapshot)})});
+  stateRevision=result.revision;
+ }catch(e){
+  saveConflict=true;dirty=true;
+  alert('Os dados não foram salvos na nuvem: '+e.message+' Faça um backup JSON e não feche a página até resolver.');
+ }finally{saveInProgress=false;if(dirty&&!saveConflict)setTimeout(flushSave,120);}
+}
+function queueStateSave(){if(!authToken)return;dirty=true;clearTimeout(saveTimer);saveTimer=setTimeout(flushSave,450);}
+async function logoutUser(){
+ if(dirty||saveInProgress){clearTimeout(saveTimer);await flushSave();for(let n=0;n<40&&saveInProgress;n++)await new Promise(r=>setTimeout(r,50));}
+ if(dirty||saveInProgress||saveConflict){alert('Existem alterações sem salvar. Exporte o backup JSON antes de sair.');return;}
+ try{await apiRequest('/auth/logout',{method:'POST'})}catch{}
+ authToken='';authUser='';S=normalizeS({});window.pluggySessionCode='';sessionStorage.removeItem(SESSION_KEY);
+ document.body.classList.add('auth-locked');document.getElementById('loginScreen').hidden=false;document.getElementById('loginPassword').value='';
+}
+async function authBoot(){
+ document.getElementById('loginForm').addEventListener('submit',performLogin);
+ document.getElementById('setupForm').addEventListener('submit',performSetup);
+ const token=sessionStorage.getItem(SESSION_KEY);
+ if(token){try{await authActivate(token)}catch(e){showLoginError(e);}}
+}
+
 if(!Array.isArray(S.pluggyIgnorados))S.pluggyIgnorados=[];
 if(!Array.isArray(S.pluggyVinculos))S.pluggyVinculos=[];
 if(!Array.isArray(S.pluggySaldos))S.pluggySaldos=[];
 if(!Array.isArray(S.pluggyNeutros))S.pluggyNeutros=[]; // Transações especiais sem impacto duplicado.
 if(!Array.isArray(S.pluggyAvisos))S.pluggyAvisos=[];
-const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
+const save=()=>queueStateSave();
 const now=new Date(),loc=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
 let ym=loc(now),tab="dash";const today=loc(now)+"-"+String(now.getDate()).padStart(2,"0");
 const $=s=>document.querySelector(s),R=v=>(+v||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}),D=d=>d?d.split("-").reverse().join("/"):"",uid=()=>Math.random().toString(36).slice(2,9);
@@ -106,7 +238,7 @@ const row=(t,s,amt,act,tag)=>`<div class="row"><div class="i"><b>${t}</b><small>
 const eb=(k,id)=>`<button class="btn s" onclick="edit('${k}','${id}')">Editar</button> <button class="btn d" onclick="del('${k}','${id}')">Excluir</button>`;
 const tgl=(k,id,p,a,b)=>`<button class="btn s" onclick="tg('${k}','${id}')">${p?b:a}</button>`;
 function nav(){const h=NAV.map(n=>`<button class="nb ${n[0]===tab?"on":""}" onclick="tab='${n[0]}';go()">${n[1]} ${n[2]}</button>`).join("");$("#sn").innerHTML=h;$("#bn").innerHTML=NAV.map(n=>`<button class="${n[0]===tab?"on":""}" onclick="tab='${n[0]}';go()"><span style="font-size:18px">${n[1]}</span>${n[2].split(" ")[0]}</button>`).join("")}
-function go(){nav();$("#ti").textContent=T[tab];$("#ym").value=ym;$("#v").innerHTML=V[tab]();window.scrollTo(0,0)}
+function go(){if(!authToken)return;nav();$("#ti").textContent=T[tab];$("#ym").value=ym;$("#v").innerHTML=V[tab]();$("#mainAdd").hidden=["rec","fix","var"].includes(tab);window.scrollTo(0,0)}
 const V={
 dash(){const t=tot(ym),dv=S.div.reduce((s,d)=>s+rest(d),0),cat={};t.v.forEach(x=>cat[x.cat]=(cat[x.cat]||0)+ +x.valor);t.b.forEach(x=>cat[x.cat]=(cat[x.cat]||0)+x.valor);const cs=Object.entries(cat).sort((a,b)=>b[1]-a[1]),mx=cs[0]?cs[0][1]:0,mxx=Math.max(t.rr+t.rp,t.dp+t.dn,1);
 const ev=[5,4,3,2,1,0].map(n=>{const y=fm(mi(ym)-n);return[MN[+y.slice(5)-1],tot(y).saldo]}),em=Math.max(...ev.map(e=>Math.abs(e[1])),1);
@@ -116,9 +248,10 @@ return pluggySaldosCard()+tip("Saldo bancário consultado: o valor disponibiliza
 <div class="card"><h3>Gastos por categoria</h3>${cs.length?cs.map(c=>bar(c[0],c[1],mx,"b")).join(""):'<p class="ex">Nenhum gasto neste mês ainda.</p>'}</div>
 <div class="card"><h3>Evolução do saldo (6 meses)</h3>${ev.map(e=>bar(e[0],Math.abs(e[1]),em,e[1]<0?"r":"g",R(e[1]))).join("")}</div>
 <div class="card"><h3>Quitação das dívidas</h3>${S.div.length?S.div.map(d=>bar(d.nome,+d.pagas,+d.total,"g",Math.round(d.pagas/d.total*100||0)+"%")).join(""):'<p class="ex">Cadastre uma dívida para acompanhar.</p>'}</div></div>`},
-rec(){const r=recs(ym),modo=window.recModo||"manual";
-const escolha=`<div class="card"><h3>Como deseja registrar receitas?</h3><div class="rec-options"><button class="btn ${modo==="manual"?"selected":"s"}" onclick="recModo='manual';go()">✍️ Preenchimento manual</button><button class="btn ${modo==="pluggy"?"selected":"s"}" onclick="recModo='pluggy';go()">🔗 Open Finance · Meu Pluggy</button></div>${modo==="manual"?`<p class="ex">Cadastre salário e outras entradas normalmente.</p><button class="btn" onclick="add('rec')">+ Adicionar receita</button>`:pluggyPanel()}</div>`;
-return escolha+`<div class="card"><h3>Receitas de ${ym.slice(5)}/${ym.slice(0,4)}</h3>${r.length?r.map(i=>row(E(i.desc),E(i.cat)+" · "+D(dd(i,ym))+" · "+(i.freq==="mensal"?"mensal":"única")+(i.pluggyRef?" · 🔗 Importado":""),R(i.valor),(i.pluggyRef?'':tgl("rec",i.id,i.paid,"Marcar recebido","Desfazer")+" ")+eb("rec",i.id),(i.pluggyRef?'':`<span class="tag ${i.paid?"":"p"}">${i.paid?"Recebido":"Previsto"}</span>`))).join(""):'<p class="ex">Nenhuma receita neste mês.</p>'}</div><div class="grid"><div class="card"><div class="k">Recebido</div><div class="v g">${R(sum(r.filter(x=>x.paid)))}</div></div><div class="card"><div class="k">Previsto</div><div class="v y">${R(sum(r.filter(x=>!x.paid)))}</div></div></div>`},
+rec(){const r=recs(ym);
+return `<div class="card"><h3>🔗 Open Finance • Meu Pluggy</h3>${pluggyPanel()}</div>`+
+`<div class="card"><h3>Entradas de ${ym.slice(5)}/${ym.slice(0,4)}</h3>${r.length?r.map(i=>row(E(i.desc),E(i.cat)+" · "+D(dd(i,ym))+(i.pluggyRef?" · 🔗 Banco":" · Cadastro anterior"),R(i.valor),eb("rec",i.id),(i.pluggyRef?'<span class="tag">Importada</span>':`<span class="tag ${i.pm?.[ym]?"":"p"}">${i.pm?.[ym]?"Recebida":"Prevista"}</span>`))).join(""):'<p class="ex">Nenhuma entrada encontrada para este mês.</p>'}</div>`+
+`<div class="grid"><div class="card"><div class="k">Recebido</div><div class="v g">${R(sum(r.filter(x=>x.paid)))}</div></div><div class="card"><div class="k">Previsto (antigo)</div><div class="v y">${R(sum(r.filter(x=>!x.paid)))}</div></div></div>`},
 fix(){const b=S.fix.filter(i=>ap(i,ym));return tip("Cadastre suas contas para saber quanto do seu salário já está comprometido.")+`<div class="card">${b.length?b.map(i=>{const p=!!(i.pm&&i.pm[ym]);return row(E(i.desc),E(i.cat)+" · "+(i.pluggyRef?"Pagamento no banco ":"vence ")+D(dd(i,ym))+" · "+i.freq+(i.pluggyRef?" · 🔗 Importado":""),R(i.valor),(i.pluggyRef?'':tgl("fix",i.id,p,"Marcar paga","Desfazer")+" ")+eb("fix",i.id)+(i.pluggyRef?` <button class="btn s" onclick="pluggyAlterarTipo('fix','${i.id}')">Mover para variáveis</button>`:''),(i.pluggyRef?'':`<span class="tag ${p?"":"p"}">${p?"Paga":"Pendente"}</span>`))}).join(""):'<p class="ex">Nenhum gasto fixo neste mês.</p>'}</div><div class="card"><div class="k">Total de gastos fixos do mês</div><div class="v r">${R(sum(b))}</div></div>`},
 var(){const c=window.fc||"";const l=S.var.filter(i=>i.data.slice(0,7)===ym&&(!c||i.cat===c)).sort((a,b)=>b.data.localeCompare(a.data));return tip("Registre aqui os gastos do dia a dia, como mercado e transporte.")+`<div class="card"><select onchange="fc=this.value;go()"><option value="">Todas as categorias</option>${CV.map(x=>`<option ${x===c?"selected":""}>${x}</option>`).join("")}</select>${l.length?l.map(i=>row(E(i.desc),E(i.cat)+" · "+D(i.data)+(i.pluggyRef?" · 🔗 Importado":""),R(i.valor),eb("var",i.id)+(i.pluggyRef?` <button class="btn s" onclick="pluggyAlterarTipo('var','${i.id}')">Mover para fixos</button>`:''))).join(""):'<p class="ex">Nenhum gasto encontrado.</p>'}</div><div class="card"><div class="k">Total filtrado</div><div class="v r">${R(sum(l))}</div></div>`},
 car(){return tip("Cadastre o cartão e depois suas compras. A fatura é calculada sozinha e pagar a fatura não conta como gasto duplicado.")+(S.car.length?S.car.map(c=>{const f=fat(c),cur=f[mi(ym)]||0,pg=!!(c.pm&&c.pm[ym]),usado=Object.keys(f).filter(m=>!(c.pm&&c.pm[fm(+m)])).reduce((s,m)=>s+f[m],0);return`<div class="card"><b>💳 ${E(c.nome)}</b> <small class="k">${E(c.banco)}</small><div class="grid" style="margin-top:8px"><div><div class="k">Limite</div><b>${R(c.limite)}</b></div><div><div class="k">Disponível</div><b class="${c.limite-usado<0?"r":"g"}">${R(c.limite-usado)}</b></div><div><div class="k">Fatura de ${ym.slice(5)}/${ym.slice(0,4)}</div><b class="r">${R(cur)}</b></div><div><div class="k">Fecha dia ${c.fech} · vence dia ${c.venc}</div></div></div>${cur>0?tgl("fat",c.id,pg,"Registrar pagamento da fatura","Desfazer pagamento")+" ":""}${eb("car",c.id)}${S.cmp.filter(p=>p.cid===c.id).map(p=>{const n=+p.parc||1,r=Object.keys(fat({...c,id:"x"})).length;const cl=mi(p.data.slice(0,7))+(+p.data.slice(8,10)>c.fech?1:0)+(c.venc<=c.fech?1:0),fut=Math.max(0,Math.min(n,cl+n-mi(ym)));return row(E(p.desc),D(p.data)+" · "+n+"x de "+R(p.valor/n)+" · "+fut+" parcela(s) a vencer",R(p.valor),eb("cmp",p.id))}).join("")}</div>`}).join(""):'<div class="card"><p class="ex">Nenhum cartão cadastrado.</p></div>')+(S.car.length?`<button class="btn" onclick="add('cmp')">+ Nova compra no cartão</button>`:"")},
@@ -129,7 +262,7 @@ rel(){const y=ym.slice(0,4),ms=[...Array(12)].map((_,i)=>{const k=y+"-"+String(i
 return tip("Aqui você compara seus meses. Barras verdes são o que entrou e vermelhas o que saiu.")+`<div class="grid"><div class="card"><div class="k">Receitas de ${y}</div><div class="v g">${R(tr)}</div></div><div class="card"><div class="k">Despesas de ${y}</div><div class="v r">${R(td)}</div></div><div class="card"><div class="k">Saldo final</div><div class="v ${tr-td<0?"r":"g"}">${R(tr-td)}</div></div></div><div class="two"><div class="card"><h3>Mês a mês em ${y}</h3><p class="ex">Considera só o que foi recebido e pago.</p>${ms.map(m=>bar(m.n+" +",m.r,mx,"g")+bar(m.n+" −",m.d,mx,"r")).join("")}</div><div><div class="card"><h3>Gastos por categoria (${ym.slice(5)}/${y})</h3>${cs.length?cs.map(c=>bar(c[0],c[1],cs[0][1],"b")).join(""):'<p class="ex">Sem gastos no mês.</p>'}</div><div class="card"><h3>Dívidas e reserva</h3>${S.div.map(d=>bar(d.nome,+d.pagas,+d.total,"g",Math.round(d.pagas/d.total*100||0)+"%")).join("")}${S.res.map(r=>bar(r.nome,+r.atual,+r.meta,"b",Math.round(r.atual/r.meta*100||0)+"%")).join("")||""}${!S.div.length&&!S.res.length?'<p class="ex">Nada cadastrado.</p>':""}</div><button class="btn" onclick="exp()">⬇ Exportar tudo (CSV)</button></div></div>`}};
 // Open Finance: somente contas BANK, sem somar saldos externos duas vezes.
 // Nenhuma credencial secreta é guardada no navegador.
-window.recModo='manual';
+window.recModo='pluggy';
 window.pluggyEndpoint='https://meu-controle-financeiro-api.leandrocmrg001.workers.dev';
 window.pluggyMsg='';
 window.pluggyPendentes=[];
@@ -150,20 +283,15 @@ function pluggySaldosCard(){
  return `<div class="card"><div class="bank-top"><h3>🏦 Saldo atual informado pelo banco</h3><button class="btn s" onclick="pluggyAtualizarAgora()" ${window.pluggyBusy?'disabled':''}>↻ Consultar novamente</button></div><div class="v ${valor<0?'r':'g'}" style="font-size:28px">${R(valor)}</div><div class="ex">Última atualização na Pluggy: ${E(formatar(horario))} · Consultado pelo site: ${E(formatar(consulta))}</div>${validas.map(c=>`<div class="bank-mini"><span>${E(c.nome)}</span><b class="${c.saldo<0?'r':'g'}">${R(c.saldo)}</b></div>`).join('')}<p class="ex">Saldos informados pela instituição. Podem ter atraso de até 24 horas. Não representam saldo histórico do mês ${E(ym)}.</p></div>`;
 }
 function pluggyPanel(){
- return `<div class="rec-hint">Receitas e gastos confirmados são enviados automaticamente para as abas corretas. Compras no crédito não são importadas como débitos bancários. Categorias podem ser corrigidas depois.</div>
- <div class="rec-field"><label for="pluggyUrl">Endereço do serviço seguro (Cloudflare)</label><input id="pluggyUrl" type="url" value="${E(window.pluggyEndpoint)}" autocomplete="url"></div>
- <div class="rec-field"><label for="pluggyCode">Código pessoal de acesso</label><input id="pluggyCode" type="password" placeholder="${window.pluggySessionCode?'Conectado nesta sessão — código guardado apenas na memória':'Senha configurada no Cloudflare'}" autocomplete="off"></div>
- <button class="btn" id="pluggySync" onclick="sincronizarMeuPluggy()" ${window.pluggyBusy?'disabled':''}>↻ ${window.pluggyBusy?'Sincronizando...':'Sincronizar receitas, gastos e saldo'}</button>
- <button class="btn s" onclick="pluggyBackup()">⬇ Fazer backup JSON</button>
+ return `<p class="rec-hint">A sessão de ${E(authUser==='leandro'?'Leandro':'Ray')} permite consultar apenas os bancos autorizados para este perfil.</p>
+ <button class="btn" id="pluggySync" onclick="sincronizarMeuPluggy()" ${window.pluggyBusy?'disabled':''}>↻ ${window.pluggyBusy?'Sincronizando...':'Sincronizar meu banco'}</button>
+ <button class="btn s" onclick="pluggyBackup()">⬇ Backup JSON</button>
  ${window.pluggyMsg?`<div class="rec-status" role="status">${E(window.pluggyMsg)}</div>`:''}
  ${pluggySaldosCard()}
- ${S.pluggyAvisos.length?`<div class="card"><h3>ℹ️ Movimentações especiais para conferir</h3><p class="ex">Esses itens não são somados novamente como renda ou despesa por serem possíveis transferências, aplicações ou pagamentos de fatura. Caso seja um gasto real, você pode reclassificá-lo.</p>${S.pluggyAvisos.slice(-20).reverse().map(t=>`<div class="row"><div class="i"><b>${E(t.desc)}</b><small>${E(t.data)} · ${E(t.motivo||'Verificar natureza do movimento')}</small></div><b>${R(t.valor)}</b><button class="btn s" onclick="pluggyReclassificarEspecial('${E(t.ref)}')">Corrigir tipo</button></div>`).join('')}</div>`:''}
- <p class="rec-hint">A sincronização lê os dados já disponíveis na Pluggy; não força o banco a atualizar na hora. O código de acesso permanece apenas na memória até fechar esta página.</p>`;
+ ${S.pluggyAvisos.length?`<div class="card"><h3>ℹ️ Movimentações para conferir</h3><p class="ex">Transferências, aplicações e faturas não entram como gastos duplicados.</p>${S.pluggyAvisos.slice(-20).reverse().map(t=>`<div class="row"><div class="i"><b>${E(t.desc)}</b><small>${E(t.data)} · ${E(t.motivo||'Verificar natureza')}</small></div><b>${R(t.valor)}</b><button class="btn s" onclick="pluggyReclassificarEspecial('${E(t.ref)}')">Reclassificar</button></div>`).join('')}</div>`:''}
+ <p class="rec-hint">O site consulta a Pluggy sem pedir uma segunda senha. O banco pode atualizar a conexão com atraso, normalmente cerca de 24 horas.</p>`;
 }
-function pluggyAtualizarAgora(){
- if(!window.pluggySessionCode){tab='rec';recModo='pluggy';window.pluggyMsg='Digite seu código pessoal de acesso para consultar o banco.';go();return;}
- sincronizarMeuPluggy();
-}
+function pluggyAtualizarAgora(){sincronizarMeuPluggy();}
 function pluggyBackup(){
  const txt=JSON.stringify({geradoEm:new Date().toISOString(),chave:KEY,dados:S},null,2);
  const url=URL.createObjectURL(new Blob([txt],{type:'application/json'}));
@@ -190,13 +318,25 @@ const PLUGGY_REGRAS_FIXAS=[
  [/\b(enel|cpfl|energisa|equatorial|cemig|conta de luz|energia eletrica)\b/,"Energia"],
  [/\b(vivo fibra|claro net|tim internet|internet fibra|banda larga)\b/,"Internet"],
  [/\b(telefone fixo|conta telefone|plano celular|telefonia)\b/,"Telefone"],
- [/\b(netflix|spotify|disney|hbo|amazon prime|assinatura|mensalidade streaming)\b/,"Assinatura"],
+ [/\b(netflix|spotify|spotify premium|disney|disney plus|hbo|max premium|amazon prime|prime video|assinatura|mensalidade streaming|deezer|youtube premium|icloud|apple one|microsoft 365|office 365|google one|google storage|google drive|google workspace|google storage plan|google yt premium|google play subscription)\b/,"Assinatura"],
  [/\b(escola|faculdade|curso mensal|mensalidade)\b/,"Mensalidade"],
  [/\b(seguro auto|seguro vida|seguradora)\b/,"Seguro"]
 ];
 function pluggyClassificarFixo(t){
  const n=pluggyNorm(t.desc);
  for(const [regex,cat] of PLUGGY_REGRAS_FIXAS)if(regex.test(n))return cat;
+ // Alguns bancos descrevem assinaturas com prefixos de cobrança.
+ if(/\b(google\s*\*?\s*(one|storage|youtube|ytpremium|workspace)|google\s+services\s+subscription|spotify\s*\*|apple\s*\*\s*icloud)\b/.test(n))return 'Assinatura';
+ // Cobranças digitais genéricas (ex.: GOOGLE *SERVICES) só viram fixas quando
+ // uma cobrança semelhante já apareceu em outro mês, em data e valor compatíveis.
+ const digital=/\b(google|apple|adobe|canva|dropbox|microsoft|msft|gplay|youtube)\b/.test(n);
+ if(digital && t.data && Number(t.valor)>0){
+   const chave=x=>pluggyNorm(x).replace(/\b(?:\d{2,}|pagamento|compra|debito|cartao|br|brasil|com)\b/g,'').trim().slice(0,32);
+   const k=chave(t.desc),atualMes=t.data.slice(0,7),dia=+t.data.slice(8,10);
+   const existente=[...S.fix,...S.var].some(x=>x.pluggyRef && x.pluggyRef!==t.pluggyRef && x.data?.slice(0,7)!==atualMes &&
+     chave(x.desc)===k && Math.abs((+x.valor||0)-(+t.valor||0))<=Math.max(1,Math.abs(+t.valor)*0.10) && Math.abs((+x.data.slice(8,10))-dia)<=6);
+   if(existente)return 'Assinatura';
+ }
  return null;
 }
 function pluggyAcumular(t){
@@ -215,17 +355,16 @@ function pluggyAcumular(t){
 // Migração prudente: move somente importações antigas classificadas genericamente como "Outros".
 // Lançamentos editados com categoria específica ficam como estão.
 function pluggyMigrarAntigos(){
- if(S.pluggyClassificacaoMigrada)return 0;
+ // Reavalia apenas importações ainda em variáveis; correções manuais são respeitadas.
  let total=0;
  for(const it of [...S.var]){
-   if(!it.pluggyRef||it.cat!=='Outros')continue;
+   if(!it.pluggyRef||it.classificacaoManual)continue;
    const cat=pluggyClassificarFixo(it);
    if(!cat)continue;
    S.var=S.var.filter(x=>x.id!==it.id);
    S.fix.push({id:it.id,desc:it.desc,valor:it.valor,data:it.data,cat,freq:'unica',pm:{[it.data.slice(0,7)]:true},pluggyRef:it.pluggyRef});
    total++;
  }
- S.pluggyClassificacaoMigrada=true;
  return total;
 }
 function pluggyAlterarTipo(k,id){
@@ -233,11 +372,11 @@ function pluggyAlterarTipo(k,id){
  if(!i||!i.pluggyRef)return;
  if(k==='fix'){
    S.fix=S.fix.filter(x=>x.id!==id);
-   S.var.push({id:i.id,desc:i.desc,valor:i.valor,data:i.data,cat:CV.includes(i.cat)?i.cat:'Outros',pluggyRef:i.pluggyRef,pm:{}});
+   S.var.push({id:i.id,desc:i.desc,valor:i.valor,data:i.data,cat:CV.includes(i.cat)?i.cat:'Outros',pluggyRef:i.pluggyRef,pm:{},classificacaoManual:true});
  }else{
    S.var=S.var.filter(x=>x.id!==id);
    const mes=i.data.slice(0,7);
-   S.fix.push({id:i.id,desc:i.desc,valor:i.valor,data:i.data,cat:CF.includes(i.cat)?i.cat:'Outra fixa',freq:'unica',pluggyRef:i.pluggyRef,pm:{[mes]:true}});
+   S.fix.push({id:i.id,desc:i.desc,valor:i.valor,data:i.data,cat:CF.includes(i.cat)?i.cat:'Outra fixa',freq:'unica',pluggyRef:i.pluggyRef,pm:{[mes]:true},classificacaoManual:true});
  }
  save();go();
 }
@@ -287,15 +426,10 @@ function pluggyConciliar(t){
  return '';
 }
 async function sincronizarMeuPluggy(){
- if(window.pluggyBusy)return;
- const url=String($('#pluggyUrl')?.value||window.pluggyEndpoint||'').trim().replace(/\/+$/,'');
- const code=$('#pluggyCode')?.value||window.pluggySessionCode||'';
- if(!/^https:\/\/[a-z0-9-]+\.leandrocmrg001\.workers\.dev$/i.test(url)||!code){window.pluggyMsg='Informe o endereço HTTPS e o código pessoal de acesso.';window.pluggyEndpoint=url;go();return}
- window.pluggyEndpoint=url;
- window.pluggySessionCode=code;
+ if(window.pluggyBusy||!authToken)return;
  window.pluggyBusy=true;const btn=$('#pluggySync');if(btn){btn.disabled=true;btn.textContent='Buscando movimentações...';}
  try{
-   const resp=await fetch(url+'/movimentacoes',{method:'POST',headers:{'Content-Type':'application/json','X-Access-Code':code},body:JSON.stringify({mes:ym}),cache:'no-store'});
+   const resp=await fetch(API_BASE+'/movimentacoes',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+authToken},body:JSON.stringify({mes:ym}),cache:'no-store'});
    const out=await resp.json();if(!resp.ok)throw new Error(out.error||'Falha de comunicação com a Pluggy.');
    if(!Array.isArray(out.movimentacoes)||!Array.isArray(out.contas)||!out.contas.length)throw new Error('Resposta incompleta ou sem contas. Nenhum registro foi alterado.');
    if(out.movimentacoes.some(t=>!pluggyVal(t))||out.contas.some(c=>typeof c.id!=='string'||(c.saldo!=null&&!Number.isFinite(c.saldo))))throw new Error('Movimentações inconsistentes. Nenhum registro foi alterado.');
@@ -320,8 +454,7 @@ async function sincronizarMeuPluggy(){
    const reorganizados=pluggyMigrarAntigos();save();window.pluggyUltimaConsulta=Date.now();window.pluggyMsg=`${novas} novo(s), ${vinculadas} conciliado(s), ${existentes} sem alteração, ${especiais} movimento(s) especial(is), ${reorganizados} importação(ões) antiga(s) reorganizada(s). Saldo consultado; veja a data da última atualização do banco.`;
  }catch(err){window.pluggyMsg='Não foi possível sincronizar: '+String(err.message||err);}
  finally{window.pluggyBusy=false;
-window.pluggySessionCode="";
-window.pluggyUltimaConsulta=0;go();}
+go();}
 }
 // ---- formulários
 function open_(h){$("#mb").innerHTML=h;$("#m").style.display="flex"}
@@ -335,7 +468,7 @@ return`<label>${f[1]}</label>${inp}`}).join("")+`<div style="display:flex;gap:8p
 function sv(k,id){const c=F[k],o={};let ok=true;c.f.forEach((f,i)=>{const e=$("#f"+i);if(!e)return;let v=e.value.trim();if(f[2]==="number")v=v===""?0:parseFloat(v.replace(",","."));o[f[0]]=v});
 const need=c.f[0][0];if(!o[need]&&o[need]!==0||o[need]==="")return er("Preencha o primeiro campo.");if(o.data===""||"data"in o&&!o.data)return er("Informe a data.");
 if(["fech","venc"].some(x=>x in o)){o.fech=Math.min(28,Math.max(1,o.fech||1));o.venc=Math.min(28,Math.max(1,o.venc||1))}
-const L=S[k];let it=id&&L.find(x=>x.id===id);if(it)Object.assign(it,o);else{it={id:uid(),...o,pm:{}};if(o.st==="1")it.pm[o.data.slice(0,7)]=true;if(k==="div"&&+it.pagas>0){}delete it.st;if(!it.pm)it.pm={};L.push(it)}delete it.st;save();close_();go()}
+const L=S[k];let it=id&&L.find(x=>x.id===id);if(it){Object.assign(it,o);if(it.pluggyRef&&(k==="fix"||k==="var"))it.classificacaoManual=true;}else{it={id:uid(),...o,pm:{}};if(o.st==="1")it.pm[o.data.slice(0,7)]=true;if(k==="div"&&+it.pagas>0){}delete it.st;if(!it.pm)it.pm={};L.push(it)}delete it.st;save();close_();go()}
 const edit=(k,id)=>add(k,S[k].find(x=>x.id===id));
 function er(t){let e=$("#er");if(!e){e=document.createElement("p");e.id="er";e.style.color="var(--r)";$("#mb").appendChild(e)}e.textContent=t}
 function del(k,id){const it=S[k].find(x=>x.id===id),rc=it&&(it.freq==="mensal"||it.freq==="anual"),B="display:block;width:100%;margin:6px 0;padding:10px";open_(`<h3>Excluir este lançamento?</h3><p class="ex">${E(it.desc||it.nome)}</p>`+(rc?`<button class="btn d" style="${B}" onclick="dl('${k}','${id}',1)">Excluir só deste mês</button>`:"")+`<button class="btn d" style="${B}" onclick="dl('${k}','${id}',0)">${rc?"Excluir em todos os meses":"Sim, excluir"}</button><button class="btn s" style="${B}" onclick="close_()">Cancelar</button>`)}
@@ -344,14 +477,17 @@ function dl(k,id,one){if(one){const it=S[k].find(x=>x.id===id);it.skip=it.skip||
  if(removida?.pluggyRef&&!S.pluggyIgnorados.includes(removida.pluggyRef))S.pluggyIgnorados.push(removida.pluggyRef);
 }S[k]=S[k].filter(x=>x.id!==id);if(k==="car")S.cmp=S.cmp.filter(x=>x.cid!==id)}save();close_();go()}
 function dep(id){const r=S.res.find(x=>x.id===id);r.atual=+r.atual+(+r.contrib||0);save();go()}
-function addAny(){if(F[tab]&&tab!=="car")return add(tab);if(tab==="car")return add("car");open_("<h3>O que deseja adicionar?</h3>"+["rec","fix","var","car","cmp","div","res"].map(k=>`<button class="btn s" style="display:block;width:100%;margin:6px 0;padding:10px" onclick="close_();add('${k}')">${F[k].t}</button>`).join(""))}
+function addAny(){if(["rec","fix","var"].includes(tab))return open_("<h3>Lançamentos pelo Open Finance</h3><p>Esses lançamentos são importados automaticamente. Para ajustar um gasto, use Editar.</p><button class=\"btn s\" onclick=\"close_()\">Fechar</button>");if(F[tab]&&tab!=="car")return add(tab);if(tab==="car")return add("car");open_("<h3>O que deseja adicionar?</h3>"+["rec","fix","var","car","cmp","div","res"].map(k=>`<button class="btn s" style="display:block;width:100%;margin:6px 0;padding:10px" onclick="close_();add('${k}')">${F[k].t}</button>`).join(""))}
 async function exp(){const rows=[["Tipo","Descrição","Valor","Data","Categoria/Detalhe"]];S.rec.forEach(i=>rows.push(["Receita",i.desc,i.valor,D(i.data),i.cat]));S.fix.forEach(i=>rows.push(["Gasto fixo",i.desc,i.valor,D(i.data),i.cat]));S.var.forEach(i=>rows.push(["Gasto variável",i.desc,i.valor,D(i.data),i.cat]));S.cmp.forEach(i=>rows.push(["Compra no cartão",i.desc,i.valor,D(i.data),i.parc+"x"]));S.div.forEach(i=>rows.push(["Dívida",i.nome,i.parcela,D(i.data),i.pagas+"/"+i.total+" pagas"]));S.res.forEach(i=>rows.push(["Reserva",i.nome,i.atual,"","meta "+i.meta]));
 const csv="\ufeff"+rows.map(r=>r.map(c=>'"'+String(c??"").replace(/"/g,'""')+'"').join(";")).join("\n");try{const d=await claude.use("downloads");if(!d)return alert("Download indisponível aqui.");await d.save({filename:"meu-controle-financeiro.csv",data:csv})}catch(e){}}
-$("#ym").onchange=e=>{if(e.target.value){ym=e.target.value;go()}};
+$("#ym").onchange=e=>{if(e.target.value){ym=e.target.value;go();if(authToken&&!window.pluggyBusy)sincronizarMeuPluggy();}};
 $("#m").onclick=e=>{if(e.target.id==="m")close_()};
+// A sessão guarda o código em memória somente enquanto a página estiver aberta.
+// A sincronização periódica consulta dados já publicados pela Pluggy (não força o banco).
+setInterval(()=>{if(authToken&&!window.pluggyBusy&&Date.now()-window.pluggyUltimaConsulta>10*60*1000&&document.visibilityState==='visible')sincronizarMeuPluggy();},60*1000);
 // Atualiza a consulta ao retornar para a janela (não força atualização na instituição).
 window.addEventListener('focus',()=>{
- if(window.pluggySessionCode&&!window.pluggyBusy&&window.pluggyUltimaConsulta&&Date.now()-window.pluggyUltimaConsulta>10*60*1000)sincronizarMeuPluggy();
+ if(authToken&&!window.pluggyBusy&&window.pluggyUltimaConsulta&&Date.now()-window.pluggyUltimaConsulta>10*60*1000)sincronizarMeuPluggy();
 });
-go();
+authBoot();
 </script></body></html>
