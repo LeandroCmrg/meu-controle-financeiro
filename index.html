@@ -48,6 +48,29 @@ nav.bt button.on{color:var(--g);font-weight:700}
 .rec-field label{margin:0 0 4px}
 .rec-hint{color:var(--mu);font-size:13px;margin:8px 0}
 .rec-status{font-size:13px;border-radius:10px;padding:10px;margin:10px 0;background:var(--bs)}
+/* Passo a passo da conexão pessoal Meu Pluggy */
+.mp-flow{display:grid;gap:10px;margin:12px 0 14px}
+.mp-step{display:flex;align-items:flex-start;gap:12px;background:var(--bg);border:1px solid var(--bd);border-radius:12px;padding:14px}
+.mp-num{display:inline-grid;place-items:center;flex:none;width:29px;height:29px;border-radius:50%;background:var(--gs);color:var(--g);font-weight:700}
+.mp-step strong{display:block;margin:2px 0 4px}
+.mp-step p{font-size:13px;color:var(--mu);margin:0 0 9px;line-height:1.5}
+.mp-step .btn{display:inline-block;text-decoration:none;text-align:center;max-width:100%}
+.mp-note{font-size:12px;color:var(--mu);line-height:1.55;margin:8px 0}
+/* Etapas verificadas pelo servidor e pelo ultimo extrato (nunca por clique). */
+.mp-progress-wrap{background:var(--bg);border:1px solid var(--bd);padding:12px 14px;border-radius:12px;margin:8px 0 12px}
+.mp-progress-head{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:7px}
+.mp-progress-head small{color:var(--mu)}
+.mp-progress-track{height:9px;background:var(--bd);border-radius:99px;overflow:hidden}
+.mp-progress-fill{height:100%;background:var(--g);border-radius:99px;transition:width .3s ease}
+.mp-step.is-complete{border-color:var(--g);background:var(--card)}
+.mp-step.is-complete .mp-num{color:#fff;background:var(--g)}
+.mp-step.is-complete strong{text-decoration:line-through;text-decoration-thickness:1.5px;color:var(--mu)}
+.mp-step .mp-result{display:inline-block;margin:0 0 10px;font-size:12px;color:var(--mu)}
+.mp-step.is-complete .mp-result{color:var(--g);font-weight:650}
+.mp-step .mp-content{flex:1;min-width:0}
+.mp-check{display:inline-block;margin-left:5px;font-weight:750}
+.mp-step .btn:focus-visible{outline:3px solid var(--b);outline-offset:3px}
+@media(max-width:500px){.mp-step{padding:12px}.mp-step .btn{width:100%}}
 #mainAdd[hidden]{display:none!important}
 .bank-mini{display:flex;justify-content:space-between;gap:10px;align-items:center;border-bottom:1px solid var(--bd);padding:10px 0;font-size:14px}
 .bank-mini:last-of-type{border-bottom:0}
@@ -121,12 +144,20 @@ async function authActivate(token){
   document.getElementById('sessionName').textContent=authDisplayName;document.getElementById('manageUsersButton').hidden=!authIsAdmin;
   window.pluggySessionCode='logado';window.pluggyUltimaConsulta=0;
 window.pluggyConnections=[];
-window.pluggyConnecting=false;window.pluggyMsg='';
+  window.pluggyConnectionsLoaded=false;window.pluggyConnectionsChecked=0;
+  window.pluggyConnectionsError='';window.pluggyCheckInFlight=false;
+  window.pluggyConnecting=false;window.pluggyMsg='';
   go();
+  // Consultar as conexoes no D1. So depois iniciar a sincronizacao automatica.
+  const sessionAtStart=authToken;
+  atualizarStatusConexoes(true).then(()=>{
+   if(authToken===sessionAtStart && me.bankLinks>0){
+    setTimeout(()=>{if(authToken===sessionAtStart&&!window.pluggyBusy)sincronizarMeuPluggy();},900);
+   }
+  });
   // Nunca importa os dados antigos do navegador sem autorização explícita.
   if(authIsAdmin)offerLegacyImport();
   // Os dados bancários podem ter até 24h de atraso na origem.
-  if(me.bankLinks>0) setTimeout(()=>{if(authToken&&!window.pluggyBusy)sincronizarMeuPluggy()},900);
   if(new URLSearchParams(location.search).has('pluggy_retorno')){
    const url=new URL(location.href);url.searchParams.delete('pluggy_retorno');history.replaceState(null,'',url.pathname+url.search+url.hash);
    pluggyRetornoOAuth();
@@ -212,7 +243,7 @@ async function logoutUser(){
  if(dirty||saveInProgress||saveConflict){alert('Existem alterações sem salvar. Exporte o backup JSON antes de sair.');return;}
  try{await apiRequest('/auth/logout',{method:'POST'})}catch{}
  pluggyLimparPendente();
- authToken='';authUser='';authDisplayName='';authIsAdmin=false;document.getElementById('manageUsersButton').hidden=true;S=normalizeS({});window.pluggySessionCode='';window.pluggyConnections=[];sessionStorage.removeItem(SESSION_KEY);
+ authToken='';authUser='';authDisplayName='';authIsAdmin=false;document.getElementById('manageUsersButton').hidden=true;S=normalizeS({});window.pluggySessionCode='';window.pluggyConnections=[];window.pluggyConnectionsLoaded=false;window.pluggyConnectionsChecked=0;window.pluggyConnectionsError='';sessionStorage.removeItem(SESSION_KEY);
  document.body.classList.add('auth-locked');document.getElementById('loginScreen').hidden=false;document.getElementById('loginPassword').value='';
 }
 async function authBoot(){
@@ -311,17 +342,83 @@ function pluggySaldosCard(){
  const formatar=x=>x&&!Number.isNaN(new Date(x).getTime())?new Date(x).toLocaleString('pt-BR'):'não informada';
  return `<div class="card"><div class="bank-top"><h3>🏦 Saldo atual informado pelo banco</h3><button class="btn s" onclick="pluggyAtualizarAgora()" ${window.pluggyBusy?'disabled':''}>↻ Consultar novamente</button></div><div class="v ${valor<0?'r':'g'}" style="font-size:28px">${R(valor)}</div><div class="ex">Última atualização na Pluggy: ${E(formatar(horario))} · Consultado pelo site: ${E(formatar(consulta))}</div>${validas.map(c=>`<div class="bank-mini"><span>${E(c.nome)}</span><b class="${c.saldo<0?'r':'g'}">${R(c.saldo)}</b></div>`).join('')}<p class="ex">Saldos informados pela instituição. Podem ter atraso de até 24 horas. Não representam saldo histórico do mês ${E(ym)}.</p></div>`;
 }
+// O cadastro externo em meu.pluggy.ai nao oferece um status consultavel por este site.
+// As etapas 1 e 2 so sao reconhecidas JUNTAS apos o vinculo bancario aprovado
+// e devolvido pelo Worker para o usuario autenticado (GET /pluggy/connections).
+// A etapa 3 exige extrato/contas obtidos com sucesso, para TODOS os itens atuais.
+function pluggyPassosStatus(){
+ const items=Array.isArray(window.pluggyConnections)?window.pluggyConnections:[];
+ const linked=!!window.pluggyConnectionsLoaded && items.length>0;
+ const p=S.pluggyChecklist||{};
+ const syncedIds=Array.isArray(p.itemIds)?p.itemIds:[];
+ const syncOK=linked && !!p.consultadoEm && Number(p.contas)>0 &&
+    items.every(id=>syncedIds.includes(id)) &&
+    !!S.pluggyConsulta && S.pluggyConsulta===p.consultadoEm;
+ return {linked,syncOK,complete:(linked?2:0)+(syncOK?1:0),count:items.length};
+}
+// Atualizacao independente do andamento: nao altera nem grava os dados financeiros.
+async function atualizarStatusConexoes(force=false){
+ if(!authToken||window.pluggyCheckInFlight)return;
+ if(!force && window.pluggyConnectionsChecked && Date.now()-window.pluggyConnectionsChecked<60000)return;
+ const token=authToken;
+ window.pluggyCheckInFlight=true;
+ try{
+  const resp=await apiRequest('/pluggy/connections');
+  if(token!==authToken)return;
+  if(!Array.isArray(resp.items) || resp.items.some(x=>!pluggyUuid(x)))throw new Error('Resposta de conexoes invalida.');
+  window.pluggyConnections=[...new Set(resp.items)];
+  window.pluggyConnectionsLoaded=true;
+  window.pluggyConnectionsError='';
+  window.pluggyConnectionsChecked=Date.now();
+ }catch(err){
+  if(token!==authToken)return;
+  window.pluggyConnectionsError=String(err.message||err);
+  // Nao marcar etapas com dados de uma consulta que falhou.
+  window.pluggyConnectionsLoaded=false;
+ }finally{
+  if(token===authToken){window.pluggyCheckInFlight=false;if(tab==='rec')go();}
+ }
+}
 function pluggyPanel(){
- return `<p class="rec-hint">A sessão de ${E(authDisplayName)} permite consultar apenas os bancos autorizados para este perfil.</p>
- <button class="btn" id="pluggyConnect" onclick="pluggyConectarBanco()" ${window.pluggyConnecting?'disabled':''}>🏦 ${window.pluggyConnecting?'Abrindo...':'Conectar banco'}</button>
- <button class="btn s" id="pluggySync" onclick="sincronizarMeuPluggy()" ${window.pluggyBusy?'disabled':''}>↻ ${window.pluggyBusy?'Sincronizando...':'Sincronizar meu banco'}</button>
- <p class="rec-hint">Conexões autorizadas neste perfil: <b>${(window.pluggyConnections||[]).length}</b>. Cada titular precisa autorizar seus próprios bancos na Pluggy.</p>
+ const status=pluggyPassosStatus();
+ const checking=!window.pluggyConnectionsLoaded && !window.pluggyConnectionsError;
+ const ready=status.complete===3;
+ const step=(number,done,title,description,action,stateText)=>`<div class="mp-step ${done?'is-complete':''}">
+  <span class="mp-num" aria-hidden="true">${done?'✓':number}</span>
+  <div class="mp-content"><strong>${title}${done?'<span class="mp-check">✓</span>':''}</strong>
+   <p>${description}</p>
+   <span class="mp-result">${done?'✓ Concluído e confirmado':E(stateText)}</span><div>${action}</div>
+  </div></div>`;
+ const stepOne=step(1,status.linked,'Criar conta e conectar o banco no Meu Pluggy',
+  'Abra o portal oficial, crie sua conta ou entre nela e conecte seu banco. Volte a esta aba depois. O site só consegue verificar o cadastro quando você autorizar o conector no passo 2.',
+  `<a class="btn s" href="https://meu.pluggy.ai/" target="_blank" rel="noopener noreferrer">↗ ${status.linked?'Gerenciar meus bancos no Meu Pluggy':'Abrir Meu Pluggy'}</a>`,
+  'Aguardando confirmação junto com o passo 2');
+ const stepTwo=step(2,status.linked,'Autorizar leitura no Meu Controle Financeiro',
+  'Na janela oficial da Pluggy, autorize o conector MeuPluggy para este perfil. Nosso servidor verifica a autorização antes de vinculá-la.',
+  `<button class="btn" id="pluggyConnect" onclick="pluggyConectarBanco()" ${window.pluggyConnecting?'disabled':''}>🔐 ${window.pluggyConnecting?'Abrindo...':status.linked?'Conectar outro banco':'Já conectei meu banco · Autorizar MeuPluggy'}</button>`,
+  checking?'Verificando conexões...':'Aguardando autorização pelo MeuPluggy');
+ const stepThree=step(3,status.syncOK,'Importar suas movimentações',
+  'O site confirma esta etapa quando consegue consultar as contas bancárias de todas as conexões autorizadas, mesmo que não haja novas transações no mês.',
+  `<button class="btn s" id="pluggySync" onclick="sincronizarMeuPluggy()" ${window.pluggyBusy?'disabled':''}>↻ ${window.pluggyBusy?'Sincronizando...':status.syncOK?'Consultar novamente':'Sincronizar meu banco'}</button>`,
+  !status.linked?'Aguardando conexão autorizada':window.pluggyBusy?'Consultando os bancos...':'Aguardando sincronização bem-sucedida');
+ return `<p class="rec-hint">Conecte somente os seus bancos ao perfil <b>${E(authDisplayName)}</b>. O progresso é verificado automaticamente.</p>
+ <div class="mp-progress-wrap" aria-live="polite">
+  <div class="mp-progress-head"><strong>${ready?'🎉 Integração concluída!':'🔗 Andamento da integração'}</strong><small>${status.complete} de 3 etapas confirmadas</small></div>
+  <div class="mp-progress-track" role="progressbar" aria-label="Progresso da integração Meu Pluggy" aria-valuemin="0" aria-valuemax="3" aria-valuenow="${status.complete}"><div class="mp-progress-fill" style="width:${status.complete/3*100}%"></div></div>
+  <p class="mp-note" style="margin:8px 0 2px">${ready?'Contas consultadas com sucesso; novos bancos exigirão nova sincronização.':checking?'Consultando as conexões deste usuário no servidor...':status.linked?'Autorização verificada no D1. Falta confirmar a importação.':'O cadastro no portal só poderá ser confirmado quando a autorização do passo 2 for concluída.'}</p>
+  <button class="btn s" onclick="atualizarStatusConexoes(true)" ${window.pluggyCheckInFlight?'disabled':''}>↻ ${window.pluggyCheckInFlight?'Verificando...':'Verificar andamento'}</button>
+  ${window.pluggyConnectionsError?`<p class="ex" role="status">Não foi possível verificar o andamento: ${E(window.pluggyConnectionsError)}</p>`:''}
+ </div>
+ <div class="mp-flow" aria-label="Passos da integração Meu Pluggy">${stepOne}${stepTwo}${stepThree}</div>
+ <p class="rec-hint">Conexões autorizadas neste perfil: <b>${window.pluggyConnectionsLoaded?status.count:'Verificando...'}</b>.</p>
+ <p class="mp-note">A criação da conta no portal externo não envia uma confirmação separada para nosso site. As etapas 1 e 2 serão riscadas juntas, após a autorização ser validada. A conclusão depende de um extrato disponível, não apenas de clicar em sincronizar.</p>
+ <p class="mp-note">O Meu Pluggy gratuito é destinado ao uso pessoal dos próprios dados, com limites e condições definidos pela Pluggy. Integrar vários titulares numa aplicação pode exigir autorização ou plano específico. Os bancos podem demorar para atualizar.</p>
  <button class="btn s" onclick="pluggyDiagnosticarManual()">🔎 Consultar erro de conexão</button>
  <button class="btn s" onclick="pluggyBackup()">⬇ Backup JSON</button>
  ${window.pluggyMsg?`<div class="rec-status" role="status">${E(window.pluggyMsg)}</div>`:''}
  ${pluggySaldosCard()}
  ${S.pluggyAvisos.length?`<div class="card"><h3>ℹ️ Movimentações para conferir</h3><p class="ex">Transferências, aplicações e faturas não entram como gastos duplicados.</p>${S.pluggyAvisos.slice(-20).reverse().map(t=>`<div class="row"><div class="i"><b>${E(t.desc)}</b><small>${E(t.data)} · ${E(t.motivo||'Verificar natureza')}</small></div><b>${R(t.valor)}</b><button class="btn s" onclick="pluggyReclassificarEspecial('${E(t.ref)}')">Reclassificar</button></div>`).join('')}</div>`:''}
- <p class="rec-hint">O site consulta a Pluggy sem pedir uma segunda senha. O banco pode atualizar a conexão com atraso, normalmente cerca de 24 horas.</p>`;
+ <p class="rec-hint">O site consulta a Pluggy sem pedir uma segunda senha. A atualização do banco pode levar até 24 horas.</p>`;
 }
 // Pluggy Connect oficial (token fornecido somente ao perfil autenticado pelo backend).
 function pluggySdk() {
@@ -356,11 +453,16 @@ function pluggyPendente(){
 function pluggyLimparPendente(){sessionStorage.removeItem(pluggyPendingKey());}
 async function pluggyConfirmarItem(id){
  if(!pluggyUuid(id))throw new Error('Identificador bancário inválido.');
+ const sessionAtStart=authToken;
  await apiRequest('/pluggy/connections',{method:'POST',body:JSON.stringify({itemId:id})});
  const linked=await apiRequest('/pluggy/connections');
- window.pluggyConnections=linked.items||[];
+ if(!sessionAtStart||sessionAtStart!==authToken)throw new Error('A sessão foi alterada. Entre novamente.');
+ if(!Array.isArray(linked.items)||!linked.items.includes(id))throw new Error('O servidor ainda não confirmou a conexão deste perfil.');
+ window.pluggyConnections=linked.items;
+ window.pluggyConnectionsLoaded=true;window.pluggyConnectionsChecked=Date.now();
+ window.pluggyConnectionsError='';
  pluggyLimparPendente();
- window.pluggyMsg='Banco conectado ao seu perfil! Você já pode sincronizar os lançamentos.';
+ window.pluggyMsg='Conexão autorizada e vinculada ao seu perfil. Consultando movimentações disponíveis...';
  go();
  await sincronizarMeuPluggy();
 }
@@ -412,6 +514,10 @@ async function pluggyConectarBanco(){
   const widget=new window.PluggyConnect({
    connectToken:out.connectToken,
    includeSandbox:false,
+   // ID 200: conector MeuPluggy, conforme a documentação oficial.
+   // Evita oferecer novamente Mercado Pago/Itaú como conexão direta.
+   connectorIds:[200],
+   selectedConnectorId:200,
    forceOauthInBrowser:true,
    onEvent:payload=>{
     // A versão 2.x envia {event,item}; o Item ID não é uma credencial.
@@ -435,13 +541,13 @@ async function pluggyConectarBanco(){
      await pluggyConsultarItem(id,false);
      window.pluggyMsg=msg+' '+window.pluggyMsg;
     }else{
-     window.pluggyMsg=msg+' Não foi fornecido um Item ID. Consulte o código mostrado na janela de erro da Pluggy.';
+     window.pluggyMsg=msg+' Se o portal Meu Pluggy já possui o banco, confira se você autorizou o conector MeuPluggy, não o banco direto. Consulte o código mostrado na janela de erro.';
     }
     go();
    }
   });
   widget.init();
-  window.pluggyMsg='Conclua a autorização na janela oficial da Pluggy.';
+  window.pluggyMsg='Na janela oficial, entre na sua conta Meu Pluggy e autorize a leitura. Após a confirmação, o vínculo será validado para este perfil.';
  }catch(err){window.pluggyMsg='Não foi possível conectar: '+err.message;}
  finally{window.pluggyConnecting=false;go();}
 }
@@ -581,10 +687,13 @@ function pluggyConciliar(t){
 }
 async function sincronizarMeuPluggy(){
  if(window.pluggyBusy||!authToken)return;
+ const sessionAtStart=authToken;
  window.pluggyBusy=true;const btn=$('#pluggySync');if(btn){btn.disabled=true;btn.textContent='Buscando movimentações...';}
  try{
    const resp=await fetch(API_BASE+'/movimentacoes',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+authToken},body:JSON.stringify({mes:ym}),cache:'no-store'});
-   const out=await resp.json();if(!resp.ok)throw new Error(out.error||'Falha de comunicação com a Pluggy.');
+   const out=await resp.json();
+   if(sessionAtStart!==authToken)return;
+   if(!resp.ok)throw new Error(out.error||'Falha de comunicação com a Pluggy.');
    if(!Array.isArray(out.movimentacoes)||!Array.isArray(out.contas)||!out.contas.length)throw new Error('Resposta incompleta ou sem contas. Nenhum registro foi alterado.');
    if(out.movimentacoes.some(t=>!pluggyVal(t))||out.contas.some(c=>typeof c.id!=='string'||(c.saldo!=null&&!Number.isFinite(c.saldo))))throw new Error('Movimentações inconsistentes. Nenhum registro foi alterado.');
    const refs=new Set();if(out.movimentacoes.some(t=>{if(refs.has(t.ref))return true;refs.add(t.ref);return false}))throw new Error('Referências bancárias duplicadas.');
@@ -604,6 +713,13 @@ async function sincronizarMeuPluggy(){
      }
      // PIX de terceiros e compras convencionais são importados automaticamente.
      pluggyAcumular(t);novas++;
+   }
+   // Registrar progresso apenas depois da consulta bem-sucedida aos bancos.
+   // Os ids dos itens permitem invalidar a etapa 3 ao adicionar outra conta.
+   if(!window.pluggyConnectionsLoaded)await atualizarStatusConexoes(true);
+   if(sessionAtStart!==authToken)return;
+   if(window.pluggyConnectionsLoaded && window.pluggyConnections.length){
+    S.pluggyChecklist={itemIds:[...window.pluggyConnections].sort(),consultadoEm:S.pluggyConsulta,contas:out.contas.length};
    }
    const reorganizados=pluggyMigrarAntigos();save();window.pluggyUltimaConsulta=Date.now();window.pluggyMsg=`${novas} novo(s), ${vinculadas} conciliado(s), ${existentes} sem alteração, ${especiais} movimento(s) especial(is), ${reorganizados} importação(ões) antiga(s) reorganizada(s). Saldo consultado; veja a data da última atualização do banco.`;
  }catch(err){window.pluggyMsg='Não foi possível sincronizar: '+String(err.message||err);}
@@ -641,7 +757,12 @@ $("#m").onclick=e=>{if(e.target.id==="m")close_()};
 setInterval(()=>{if(authToken&&!window.pluggyBusy&&Date.now()-window.pluggyUltimaConsulta>10*60*1000&&document.visibilityState==='visible')sincronizarMeuPluggy();},60*1000);
 // Atualiza a consulta ao retornar para a janela (não força atualização na instituição).
 window.addEventListener('focus',()=>{
+ if(authToken){atualizarStatusConexoes();}
  if(authToken&&!window.pluggyBusy&&window.pluggyUltimaConsulta&&Date.now()-window.pluggyUltimaConsulta>10*60*1000)sincronizarMeuPluggy();
 });
+// Confere novas autorizacoes enquanto a pessoa mantem a aba Receitas aberta.
+setInterval(()=>{
+ if(authToken&&tab==='rec'&&document.visibilityState==='visible')atualizarStatusConexoes();
+},120000);
 authBoot();
 </script></body></html>
