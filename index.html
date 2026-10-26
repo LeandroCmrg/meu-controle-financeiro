@@ -48,6 +48,8 @@ nav.bt button.on{color:var(--g);font-weight:700}
 .rec-field label{margin:0 0 4px}
 .rec-hint{color:var(--mu);font-size:13px;margin:8px 0}
 .rec-status{font-size:13px;border-radius:10px;padding:10px;margin:10px 0;background:var(--bs)}
+.bank-mini{display:flex;justify-content:space-between;gap:10px;align-items:center;border-bottom:1px solid var(--bd);padding:10px 0;font-size:14px}
+.bank-mini:last-of-type{border-bottom:0}
 @media(max-width:760px){aside{display:none}nav.bt{display:flex}.bl{grid-template-columns:90px 1fr 80px}}
 
 </style></head><body>
@@ -59,6 +61,8 @@ const KEY="mcf_v1";
 const def=()=>({rec:[],fix:[],var:[],car:[],cmp:[],div:[],res:[]});
 let S;try{S=Object.assign(def(),JSON.parse(localStorage.getItem(KEY))||{})}catch(e){S=def()}
 if(!Array.isArray(S.pluggyIgnorados))S.pluggyIgnorados=[];
+if(!Array.isArray(S.pluggyVinculos))S.pluggyVinculos=[];
+if(!Array.isArray(S.pluggySaldos))S.pluggySaldos=[];
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
 const now=new Date(),loc=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
 let ym=loc(now),tab="dash";const today=loc(now)+"-"+String(now.getDate()).padStart(2,"0");
@@ -105,7 +109,7 @@ const V={
 dash(){const t=tot(ym),dv=S.div.reduce((s,d)=>s+rest(d),0),cat={};t.v.forEach(x=>cat[x.cat]=(cat[x.cat]||0)+ +x.valor);t.b.forEach(x=>cat[x.cat]=(cat[x.cat]||0)+x.valor);const cs=Object.entries(cat).sort((a,b)=>b[1]-a[1]),mx=cs[0]?cs[0][1]:0,mxx=Math.max(t.rr+t.rp,t.dp+t.dn,1);
 const ev=[5,4,3,2,1,0].map(n=>{const y=fm(mi(ym)-n);return[MN[+y.slice(5)-1],tot(y).saldo]}),em=Math.max(...ev.map(e=>Math.abs(e[1])),1);
 const K=(a,b,c,d)=>`<div class="card"><div class="k">${a}</div><div class="v ${c}">${b}</div><div class="k">${d||""}</div></div>`;
-return tip("Aqui você vê um resumo do mês escolhido. Tudo é calculado sozinho a partir do que você cadastrar.")+`<div class="grid">${K("Receitas do mês",R(t.rr+t.rp),"g","Recebido "+R(t.rr)+" · previsto "+R(t.rp))}${K("Gastos do mês",R(t.dp+t.dn),"r","Pago "+R(t.dp)+" · pendente "+R(t.dn))}${K("Dívidas restantes",R(dv),"r")}${K("Contas pendentes",R(t.bn),"y")}${K("Contas pagas",R(t.bp),"g")}${K("Saldo disponível",R(t.saldo),t.saldo<0?"r":"g","Recebido menos pago")}${K("Ainda pode gastar",R(t.livre),t.livre<0?"r":"b","Veja quanto sobra depois de pagar tudo")}</div>
+return tip("Resumo dos lançamentos do mês. O saldo bancário do Open Finance é mostrado separadamente e não é somado de novo às receitas.")+pluggySaldosCard()+`<div class="grid">${K("Receitas do mês",R(t.rr+t.rp),"g","Recebido "+R(t.rr)+" · previsto "+R(t.rp))}${K("Gastos do mês",R(t.dp+t.dn),"r","Pago "+R(t.dp)+" · pendente "+R(t.dn))}${K("Dívidas restantes",R(dv),"r")}${K("Contas pendentes",R(t.bn),"y")}${K("Contas pagas",R(t.bp),"g")}${K("Saldo do mês (controle)",R(t.saldo),t.saldo<0?"r":"g","Recebido menos pago no mês")}${K("Sobra estimada do mês",R(t.livre),t.livre<0?"r":"b","Não representa o saldo do banco")}</div>
 <div class="two"><div class="card"><h3>Receitas versus despesas</h3>${bar("Receitas",t.rr+t.rp,mxx,"g")}${bar("Despesas",t.dp+t.dn,mxx,"r")}</div>
 <div class="card"><h3>Gastos por categoria</h3>${cs.length?cs.map(c=>bar(c[0],c[1],mx,"b")).join(""):'<p class="ex">Nenhum gasto neste mês ainda.</p>'}</div>
 <div class="card"><h3>Evolução do saldo (6 meses)</h3>${ev.map(e=>bar(e[0],Math.abs(e[1]),em,e[1]<0?"r":"g",R(e[1]))).join("")}</div>
@@ -114,83 +118,134 @@ rec(){const r=recs(ym),modo=window.recModo||"manual";
 const escolha=`<div class="card"><h3>Como deseja registrar receitas?</h3><div class="rec-options"><button class="btn ${modo==="manual"?"selected":"s"}" onclick="recModo='manual';go()">✍️ Preenchimento manual</button><button class="btn ${modo==="pluggy"?"selected":"s"}" onclick="recModo='pluggy';go()">🔗 Open Finance · Meu Pluggy</button></div>${modo==="manual"?`<p class="ex">Cadastre salário e outras entradas normalmente.</p><button class="btn" onclick="add('rec')">+ Adicionar receita</button>`:pluggyPanel()}</div>`;
 return escolha+`<div class="card"><h3>Receitas de ${ym.slice(5)}/${ym.slice(0,4)}</h3>${r.length?r.map(i=>row(E(i.desc),E(i.cat)+" · "+D(dd(i,ym))+" · "+(i.freq==="mensal"?"mensal":"única")+(i.pluggyRef?" · 🔗 Importado":""),R(i.valor),tgl("rec",i.id,i.paid,"Marcar recebido","Desfazer")+" "+eb("rec",i.id),`<span class="tag ${i.paid?"":"p"}">${i.paid?"Recebido":"Previsto"}</span>`)).join(""):'<p class="ex">Nenhuma receita neste mês.</p>'}</div><div class="grid"><div class="card"><div class="k">Recebido</div><div class="v g">${R(sum(r.filter(x=>x.paid)))}</div></div><div class="card"><div class="k">Previsto</div><div class="v y">${R(sum(r.filter(x=>!x.paid)))}</div></div></div>`},
 fix(){const b=S.fix.filter(i=>ap(i,ym));return tip("Cadastre suas contas para saber quanto do seu salário já está comprometido.")+`<div class="card">${b.length?b.map(i=>{const p=!!(i.pm&&i.pm[ym]);return row(E(i.desc),E(i.cat)+" · vence "+D(dd(i,ym))+" · "+i.freq,R(i.valor),tgl("fix",i.id,p,"Marcar paga","Desfazer")+" "+eb("fix",i.id),`<span class="tag ${p?"":"p"}">${p?"Paga":"Pendente"}</span>`)}).join(""):'<p class="ex">Nenhum gasto fixo neste mês.</p>'}</div><div class="card"><div class="k">Total de gastos fixos do mês</div><div class="v r">${R(sum(b))}</div></div>`},
-var(){const c=window.fc||"";const l=S.var.filter(i=>i.data.slice(0,7)===ym&&(!c||i.cat===c)).sort((a,b)=>b.data.localeCompare(a.data));return tip("Registre aqui os gastos do dia a dia, como mercado e transporte.")+`<div class="card"><select onchange="fc=this.value;go()"><option value="">Todas as categorias</option>${CV.map(x=>`<option ${x===c?"selected":""}>${x}</option>`).join("")}</select>${l.length?l.map(i=>row(E(i.desc),E(i.cat)+" · "+D(i.data),R(i.valor),eb("var",i.id))).join(""):'<p class="ex">Nenhum gasto encontrado.</p>'}</div><div class="card"><div class="k">Total filtrado</div><div class="v r">${R(sum(l))}</div></div>`},
-car(){return tip("Cadastre o cartão e depois suas compras. A fatura é calculada sozinha e pagar a fatura não conta como gasto duplicado.")+(S.car.length?S.car.map(c=>{const f=fat(c),cur=f[mi(ym)]||0,pg=!!(c.pm&&c.pm[ym]),usado=Object.keys(f).filter(m=>!(c.pm&&c.pm[fm(+m)])).reduce((s,m)=>s+f[m],0);return`<div class="card"><b>💳 ${E(c.nome)}</b> <small class="k">${E(c.banco)}</small><div class="grid" style="margin-top:8px"><div><div class="k">Limite</div><b>${R(c.limite)}</b></div><div><div class="k">Disponível</div><b class="g">${R(c.limite-usado)}</b></div><div><div class="k">Fatura de ${ym.slice(5)}/${ym.slice(0,4)}</div><b class="r">${R(cur)}</b></div><div><div class="k">Fecha dia ${c.fech} · vence dia ${c.venc}</div></div></div>${cur>0?tgl("fat",c.id,pg,"Registrar pagamento da fatura","Desfazer pagamento")+" ":""}${eb("car",c.id)}${S.cmp.filter(p=>p.cid===c.id).map(p=>{const n=+p.parc||1,r=Object.keys(fat({...c,id:"x"})).length;const cl=mi(p.data.slice(0,7))+(+p.data.slice(8,10)>c.fech?1:0)+(c.venc<=c.fech?1:0),fut=Math.max(0,Math.min(n,cl+n-mi(ym)));return row(E(p.desc),D(p.data)+" · "+n+"x de "+R(p.valor/n)+" · "+fut+" parcela(s) a vencer",R(p.valor),eb("cmp",p.id))}).join("")}</div>`}).join(""):'<div class="card"><p class="ex">Nenhum cartão cadastrado.</p></div>')+(S.car.length?`<button class="btn" onclick="add('cmp')">+ Nova compra no cartão</button>`:"")},
+var(){const c=window.fc||"";const l=S.var.filter(i=>i.data.slice(0,7)===ym&&(!c||i.cat===c)).sort((a,b)=>b.data.localeCompare(a.data));return tip("Registre aqui os gastos do dia a dia, como mercado e transporte.")+`<div class="card"><select onchange="fc=this.value;go()"><option value="">Todas as categorias</option>${CV.map(x=>`<option ${x===c?"selected":""}>${x}</option>`).join("")}</select>${l.length?l.map(i=>row(E(i.desc),E(i.cat)+" · "+D(i.data)+(i.pluggyRef?" · 🔗 Importado":""),R(i.valor),eb("var",i.id))).join(""):'<p class="ex">Nenhum gasto encontrado.</p>'}</div><div class="card"><div class="k">Total filtrado</div><div class="v r">${R(sum(l))}</div></div>`},
+car(){return tip("Cadastre o cartão e depois suas compras. A fatura é calculada sozinha e pagar a fatura não conta como gasto duplicado.")+(S.car.length?S.car.map(c=>{const f=fat(c),cur=f[mi(ym)]||0,pg=!!(c.pm&&c.pm[ym]),usado=Object.keys(f).filter(m=>!(c.pm&&c.pm[fm(+m)])).reduce((s,m)=>s+f[m],0);return`<div class="card"><b>💳 ${E(c.nome)}</b> <small class="k">${E(c.banco)}</small><div class="grid" style="margin-top:8px"><div><div class="k">Limite</div><b>${R(c.limite)}</b></div><div><div class="k">Disponível</div><b class="${c.limite-usado<0?"r":"g"}">${R(c.limite-usado)}</b></div><div><div class="k">Fatura de ${ym.slice(5)}/${ym.slice(0,4)}</div><b class="r">${R(cur)}</b></div><div><div class="k">Fecha dia ${c.fech} · vence dia ${c.venc}</div></div></div>${cur>0?tgl("fat",c.id,pg,"Registrar pagamento da fatura","Desfazer pagamento")+" ":""}${eb("car",c.id)}${S.cmp.filter(p=>p.cid===c.id).map(p=>{const n=+p.parc||1,r=Object.keys(fat({...c,id:"x"})).length;const cl=mi(p.data.slice(0,7))+(+p.data.slice(8,10)>c.fech?1:0)+(c.venc<=c.fech?1:0),fut=Math.max(0,Math.min(n,cl+n-mi(ym)));return row(E(p.desc),D(p.data)+" · "+n+"x de "+R(p.valor/n)+" · "+fut+" parcela(s) a vencer",R(p.valor),eb("cmp",p.id))}).join("")}</div>`}).join(""):'<div class="card"><p class="ex">Nenhum cartão cadastrado.</p></div>')+(S.car.length?`<button class="btn" onclick="add('cmp')">+ Nova compra no cartão</button>`:"")},
 div(){const dv=S.div,or=sum(dv.map(d=>({valor:d.orig}))),rs=dv.reduce((s,d)=>s+rest(d),0),mn=dv.reduce((s,d)=>s+(+d.pagas<+d.total?+d.parcela:0),0);return tip("Cadastre cada dívida. Ao pagar uma parcela, o valor restante e o progresso se atualizam sozinhos.")+`<div class="grid"><div class="card"><div class="k">Total de dívidas</div><div class="v">${R(or)}</div></div><div class="card"><div class="k">Já pago</div><div class="v g">${R(Math.max(0,or-rs))}</div></div><div class="card"><div class="k">Restante</div><div class="v r">${R(rs)}</div></div><div class="card"><div class="k">Parcelas por mês</div><div class="v y">${R(mn)}</div></div></div>`+dv.map(d=>{const p=Math.round(d.pagas/d.total*100)||0;return`<div class="card"><b>${E(d.nome)}</b> <small class="k">${E(d.inst)}${d.juros?" · juros "+d.juros+"% ao mês":""}</small><div class="k">Parcela ${R(d.parcela)} · ${d.pagas}/${d.total} pagas · restam ${R(rest(d))} · vence dia ${+d.data.slice(8,10)}</div>${bar("Progresso",p,100,"g",p+"%")}${eb("div",d.id)}</div>`}).join("")||'<div class="card"><p class="ex">Nenhuma dívida cadastrada. Que bom!</p></div>'},
 pag(){const b=bills(ym).sort((a,c)=>a.due.localeCompare(c.due)),G=[["Vencidas","v",x=>!x.paid&&x.due<today],["Vencem hoje","p",x=>!x.paid&&x.due===today],["Próximos vencimentos","",x=>!x.paid&&x.due>today],["Pagas","",x=>x.paid]];return tip("Marque uma conta como paga para atualizar seu saldo.")+G.map(g=>{const l=b.filter(g[2]);return`<div class="card"><h3>${g[0]} (${l.length}) · ${R(sum(l))}</h3>${l.length?l.map(x=>row(E(x.desc),"Vence em "+D(x.due),R(x.valor),tgl(x.k,x.id,x.paid,"Marcar como paga","Desfazer"),`<span class="tag ${x.paid?"":g[1]||"p"}">${x.paid?"Paga":g[0]==="Vencidas"?"Vencida":"A pagar"}</span>`)).join(""):'<p class="ex">Nada aqui.</p>'}</div>`}).join("")},
 res(){const t=sum(S.res.map(r=>({valor:r.atual})));return tip("Guarde dinheiro para seus objetivos e acompanhe o quanto já conseguiu.")+`<div class="card"><div class="k">Total guardado</div><div class="v g">${R(t)}</div></div>`+S.res.map(r=>{const p=Math.min(100,Math.round(r.atual/r.meta*100)||0),f=+r.contrib>0?Math.ceil(Math.max(0,r.meta-r.atual)/r.contrib):0;return`<div class="card"><b>${E(r.nome)}</b> <small class="k">${E(r.obj)}</small>${bar(R(r.atual),p,100,"g",p+"%")}<div class="k">Meta ${R(r.meta)} · contribuição ${R(r.contrib)}/mês${f?" · faltam ~"+f+" meses":""}</div><button class="btn s" onclick="dep('${r.id}')">+ Guardar contribuição</button> ${eb("res",r.id)}</div>`}).join("")},
 rel(){const y=ym.slice(0,4),ms=[...Array(12)].map((_,i)=>{const k=y+"-"+String(i+1).padStart(2,"0"),t=tot(k);return{k,n:MN[i],r:t.rr,d:t.dp,s:t.saldo}}),mx=Math.max(...ms.map(m=>Math.max(m.r,m.d)),1),t=tot(ym),cat={};t.v.forEach(x=>cat[x.cat]=(cat[x.cat]||0)+ +x.valor);t.b.forEach(x=>cat[x.cat]=(cat[x.cat]||0)+x.valor);const cs=Object.entries(cat).sort((a,b)=>b[1]-a[1]),tr=sum(ms.map(m=>({valor:m.r}))),td=sum(ms.map(m=>({valor:m.d})));
 return tip("Aqui você compara seus meses. Barras verdes são o que entrou e vermelhas o que saiu.")+`<div class="grid"><div class="card"><div class="k">Receitas de ${y}</div><div class="v g">${R(tr)}</div></div><div class="card"><div class="k">Despesas de ${y}</div><div class="v r">${R(td)}</div></div><div class="card"><div class="k">Saldo final</div><div class="v ${tr-td<0?"r":"g"}">${R(tr-td)}</div></div></div><div class="two"><div class="card"><h3>Mês a mês em ${y}</h3><p class="ex">Considera só o que foi recebido e pago.</p>${ms.map(m=>bar(m.n+" +",m.r,mx,"g")+bar(m.n+" −",m.d,mx,"r")).join("")}</div><div><div class="card"><h3>Gastos por categoria (${ym.slice(5)}/${y})</h3>${cs.length?cs.map(c=>bar(c[0],c[1],cs[0][1],"b")).join(""):'<p class="ex">Sem gastos no mês.</p>'}</div><div class="card"><h3>Dívidas e reserva</h3>${S.div.map(d=>bar(d.nome,+d.pagas,+d.total,"g",Math.round(d.pagas/d.total*100||0)+"%")).join("")}${S.res.map(r=>bar(r.nome,+r.atual,+r.meta,"b",Math.round(r.atual/r.meta*100||0)+"%")).join("")||""}${!S.div.length&&!S.res.length?'<p class="ex">Nada cadastrado.</p>':""}</div><button class="btn" onclick="exp()">⬇ Exportar tudo (CSV)</button></div></div>`}};
-// Meu Pluggy — modo de leitura de receitas, sem credenciais bancárias no HTML.
-// A API pessoal exige backend para não expor Client Secret. Somente a aba Receitas foi alterada.
-window.recModo="manual";
-window.pluggyEndpoint="";
-window.pluggyMsg="";
+// Open Finance: somente contas BANK, sem somar saldos externos duas vezes.
+// Nenhuma credencial secreta é guardada no navegador.
+window.recModo='manual';
+window.pluggyEndpoint='https://meu-controle-financeiro-api.leandrocmrg001.workers.dev';
+window.pluggyMsg='';
 window.pluggyPendentes=[];
 window.pluggyBusy=false;
+const pluggyNorm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+const pluggyVal=t=>t && typeof t.ref==='string' && /^[\w:-]{1,200}$/.test(t.ref) && /^20\d{2}-\d{2}-\d{2}$/.test(t.data)
+  && ['entrada','saida'].includes(t.tipo) && Number.isFinite(t.valor) && t.valor>0 && typeof t.desc==='string' && t.desc.length>0;
+function pluggySaldosCard(){
+ if(!S.pluggySaldos?.length)return '';
+ const validas=S.pluggySaldos.filter(c=>c.moeda==='BRL'&&Number.isFinite(c.saldo));
+ const valor=validas.reduce((a,c)=>a+c.saldo,0), atualizado=S.pluggyConsulta||'';
+ return `<div class="card"><h3>🏦 Saldo informado pelo banco (Open Finance)</h3><div class="v ${valor<0?'r':'g'}">${R(valor)}</div><small class="ex">Última consulta ao Pluggy: ${E(atualizado?new Date(atualizado).toLocaleString('pt-BR'):'não informada')}. Atualização do banco não é instantânea. Este valor é uma fotografia atual, não o saldo histórico do mês selecionado.</small>${validas.map(c=>`<div class="bank-mini"><span>${E(c.nome)}</span><b class="${c.saldo<0?'r':'g'}">${R(c.saldo)}</b></div>`).join('')}<p class="ex">Não somamos este saldo ao resultado dos lançamentos, evitando contar o mesmo dinheiro duas vezes.</p></div>`;
+}
 function pluggyPanel(){
- return `<div class="rec-hint">Primeiro autorize seus bancos no <a href="https://meu.pluggy.ai/" target="_blank" rel="noopener noreferrer">Meu Pluggy ↗</a>. Para trazer as entradas ao site, configure a conexão segura conforme o guia fornecido com o arquivo.</div>
- <div class="rec-field"><label for="pluggyUrl">Endereço da integração segura</label><input id="pluggyUrl" type="url" placeholder="https://seu-worker.workers.dev" autocomplete="url" value="${E(window.pluggyEndpoint)}"></div>
- <div class="rec-field"><label for="pluggyCode">Código de acesso pessoal</label><input id="pluggyCode" type="password" placeholder="Código configurado no servidor" autocomplete="off"></div>
- <button class="btn" id="pluggySync" onclick="sincronizarMeuPluggy()" ${window.pluggyBusy?"disabled":""}>🔄 ${window.pluggyBusy?"Buscando receitas...":"Sincronizar receitas deste mês"}</button>
- ${window.pluggyMsg?`<div class="rec-status" role="status">${E(window.pluggyMsg)}</div>`:""}
- ${window.pluggyPendentes.length?`<div class="card" style="margin-top:12px"><h3>⚠️ Recebimentos para conferir</h3><p class="ex">PIX, transferências, resgates e empréstimos podem não ser renda nova. Confirme somente o que for receita de verdade.</p>${window.pluggyPendentes.map(t=>`<div class="row"><div class="i"><b>${E(t.desc)}</b><small>${D(t.data)} · ${E(t.banco||"Banco")}</small></div><b>${R(t.valor)}</b><button class="btn s" onclick="confirmarReceitaPluggy('${t.ref}')">Registrar</button><button class="btn s" onclick="ignorarReceitaPluggy('${t.ref}')">Ignorar</button></div>`).join("")}</div>`:""}
- <p class="rec-hint">Somente entradas de contas bancárias confirmadas são analisadas. Transferências e PIX são separados para revisão. Os dados não ficam sincronizados entre dispositivos neste estágio.</p>`;
+ return `<div class="rec-hint">Sincroniza os lançamentos confirmados de suas contas bancárias (não as compras em cartão de crédito). O saldo real do banco é mostrado separadamente, sem substituir os lançamentos do controle.</div>
+ <div class="rec-field"><label for="pluggyUrl">Endereço do serviço seguro (Cloudflare)</label><input id="pluggyUrl" type="url" value="${E(window.pluggyEndpoint)}" autocomplete="url"></div>
+ <div class="rec-field"><label for="pluggyCode">Código pessoal de acesso</label><input id="pluggyCode" type="password" placeholder="Senha configurada no Cloudflare" autocomplete="off"></div>
+ <button class="btn" id="pluggySync" onclick="sincronizarMeuPluggy()" ${window.pluggyBusy?'disabled':''}>🔄 ${window.pluggyBusy?'Sincronizando...':'Sincronizar entradas, saídas e saldo'}</button>
+ <button class="btn s" onclick="pluggyBackup()">⬇ Backup dos lançamentos (JSON)</button>
+ ${window.pluggyMsg?`<div class="rec-status" role="status">${E(window.pluggyMsg)}</div>`:''}
+ ${pluggySaldosCard()}
+ ${window.pluggyPendentes.length?`<div class="card"><h3>⚠️ Movimentações para conferir</h3><p class="ex">Transferências próprias, pagamentos de fatura e outros movimentos ambíguos ficam aqui. Não entram nos resultados sem decisão.</p>${window.pluggyPendentes.map(t=>`<div class="row"><div class="i"><b>${E(t.desc)}</b><small>${D(t.data)} · ${E(t.banco)} · ${E(t.motivo||'Conferir classificação')}</small></div><b class="${t.tipo==='saida'?'r':'g'}">${t.tipo==='saida'?'-':'+'}${R(t.valor)}</b><button class="btn s" onclick="pluggyConfirmar('${t.ref}')">Registrar</button><button class="btn s" onclick="pluggyIgnorar('${t.ref}')">Já registrado / ignorar</button></div>`).join('')}</div>`:''}
+ <p class="rec-hint">As despesas importadas ficam em Gastos variáveis e podem ser editadas. Itens já conciliados não são recriados. Nenhuma senha bancária é solicitada aqui e o código de acesso não é armazenado.</p>`;
 }
-const pluggyNormaliza=s=>String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
-function pluggyJaExiste(t){
- if(S.pluggyIgnorados.includes(t.ref))return true;
- if(S.rec.some(i=>i.pluggyRef===t.ref))return true;
- const n=pluggyNormaliza(t.desc);
- return S.rec.some(i=>{
-  if(!i.data||!Number.isFinite(+i.valor)||Math.abs(+i.valor-t.valor)>0.009)return false;
-  if(i.freq==="mensal"&&t.data.slice(0,7)>=i.data.slice(0,7))return i.cat==="Salário"&&t.cat==="Salário"&&!!i.pm?.[t.data.slice(0,7)];
-  return i.freq!=="mensal"&&i.data===t.data&&pluggyNormaliza(i.desc)===n;
- });
+function pluggyBackup(){
+ const txt=JSON.stringify({geradoEm:new Date().toISOString(),chave:KEY,dados:S},null,2);
+ const url=URL.createObjectURL(new Blob([txt],{type:'application/json'}));
+ const a=document.createElement('a');a.href=url;a.download='backup-meu-controle-financeiro.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);
 }
-function confirmarReceitaPluggy(ref){
- const t=window.pluggyPendentes.find(x=>x.ref===ref);if(!t||pluggyJaExiste(t))return;
- S.rec.push({id:uid(),desc:t.desc.slice(0,120),valor:Math.round(t.valor*100)/100,data:t.data,cat:CR.includes(t.cat)?t.cat:"Outras receitas",freq:"unica",pm:{[t.data.slice(0,7)]:true},pluggyRef:t.ref});
- window.pluggyPendentes=window.pluggyPendentes.filter(x=>x.ref!==ref);
- window.pluggyMsg="Receita confirmada e registrada. Você pode editá-la na lista abaixo.";save();go();
+function pluggyExistente(ref){
+ return S.pluggyIgnorados.includes(ref) || S.pluggyVinculos.includes(ref)
+ || S.rec.some(i=>i.pluggyRef===ref) || S.var.some(i=>i.pluggyRef===ref);
 }
-function ignorarReceitaPluggy(ref){
+function pluggyComparar(t,desc,data,valor){
+ if(Math.abs(Number(valor)-t.valor)>0.009 || !/^\d{4}-\d{2}-\d{2}$/.test(data||''))return false;
+ const dt=new Date(t.data+'T12:00:00'), dr=new Date(data+'T12:00:00');
+ if(Math.abs(dt-dr)>3*86400000)return false;
+ const a=pluggyNorm(t.desc).replace(/^(?:pix|pagamento|compra)\s+/,'');
+ const b=pluggyNorm(desc).replace(/^(?:pix|pagamento|compra)\s+/,'');
+ return !!(a.length>=4&&b.length>=4&&(a.includes(b)||b.includes(a)));
+}
+function pluggyAcumular(t){
+ if(t.tipo==='entrada')S.rec.push({id:uid(),desc:t.desc.slice(0,120),valor:t.valor,data:t.data,cat:CR.includes(t.cat)?t.cat:'Outras receitas',freq:'unica',pm:{[t.data.slice(0,7)]:true},pluggyRef:t.ref});
+ else S.var.push({id:uid(),desc:t.desc.slice(0,120),valor:t.valor,data:t.data,cat:CV.includes(t.cat)?t.cat:'Outros',pm:{},pluggyRef:t.ref});
+}
+// Reconciliação conservadora. Só vincula automaticamente quando há UMA correspondência clara.
+// Faturas e despesas já cadastradas não são lançadas uma segunda vez.
+function pluggyConciliar(t){
+ const mes=t.data.slice(0,7);
+ if(t.tipo==='entrada'){
+   const matches=S.rec.filter(i=>{if(i.pluggyRef)return false;
+     if(i.freq==='mensal')return i.data?.slice(0,7)<=mes && i.cat==='Salário' && t.cat==='Salário' && Math.abs(i.valor-t.valor)<.01;
+     return pluggyComparar(t,i.desc,i.data,i.valor);
+   });
+   if(matches.length===1){const i=matches[0];if(i.freq!=='mensal')i.pluggyRef=t.ref;
+     i.pm=i.pm||{};i.pm[mes]=true;S.pluggyVinculos.push(t.ref);return 'vinculado';}
+   if(matches.length>1)return 'revisar';
+   return '';
+ }
+ const variable=S.var.filter(i=>!i.pluggyRef&&pluggyComparar(t,i.desc,i.data,i.valor));
+ if(variable.length===1){variable[0].pluggyRef=t.ref;S.pluggyVinculos.push(t.ref);return 'vinculado';}
+ if(variable.length>1)return 'revisar';
+ // Buscar só contas fixas semelhantes que já pertencem ao mês.
+ const fixed=S.fix.filter(i=>ap(i,mes)&&pluggyComparar(t,i.desc,dd(i,mes),i.valor));
+ if(fixed.length===1){fixed[0].pm=fixed[0].pm||{};fixed[0].pm[mes]=true;S.pluggyVinculos.push(t.ref);return 'vinculado';}
+ if(fixed.length>1)return 'revisar';
+ // Pagamento de fatura: a despesa é a fatura, não uma nova compra.
+ if(/(?:fatura|cartao\s+de\s+credito|pagamento\s+cartao)/.test(pluggyNorm(t.desc))){
+   const cards=[];
+   for(const c of S.car){
+     for(const y of [mes,fm(mi(mes)-1)]){
+       const v=fat(c)[mi(y)]||0;
+       if(v>0&&Math.abs(v-t.valor)<.01&&Math.abs(new Date(dd({data:y+'-'+String(c.venc).padStart(2,'0')},y)+'T12:00:00')-new Date(t.data+'T12:00:00'))<=7*86400000) cards.push({c,y});
+     }
+   }
+   if(cards.length===1){cards[0].c.pm=cards[0].c.pm||{};cards[0].c.pm[cards[0].y]=true;S.pluggyVinculos.push(t.ref);return 'vinculado';}
+   return 'revisar';
+ }
+ return '';
+}
+function pluggyConfirmar(ref){
+ const t=window.pluggyPendentes.find(x=>x.ref===ref);if(!t||pluggyExistente(t.ref))return;
+ pluggyAcumular(t);window.pluggyPendentes=window.pluggyPendentes.filter(x=>x.ref!==ref);
+ window.pluggyMsg='Movimentação registrada. É possível editá-la normalmente.';save();go();
+}
+function pluggyIgnorar(ref){
  if(!window.pluggyPendentes.some(x=>x.ref===ref))return;
  if(!S.pluggyIgnorados.includes(ref))S.pluggyIgnorados.push(ref);
  window.pluggyPendentes=window.pluggyPendentes.filter(x=>x.ref!==ref);
- window.pluggyMsg="Movimentação ignorada. Ela não será adicionada novamente por sincronização.";save();go();
-}
-function pluggyValidaEntrada(t){
- if(!t||typeof t.ref!=="string"||!t.ref||!/^\d{4}-\d{2}-\d{2}$/.test(t.data)||!Number.isFinite(t.valor)||t.valor<=0||!t.desc)return false;
- return !!t.ref.match(/^[\w:-]{1,200}$/);
+ window.pluggyMsg='Movimentação não importada. Não aparecerá novamente nas próximas sincronizações.';save();go();
 }
 async function sincronizarMeuPluggy(){
  if(window.pluggyBusy)return;
- const url=String($("#pluggyUrl")?.value||"").trim().replace(/\/+$/, "");
- const code=$("#pluggyCode")?.value||"";
- if(!/^https:\/\/[^\s/]+/i.test(url)||!code){window.pluggyMsg="Informe o endereço HTTPS do servidor seguro e seu código de acesso.";window.pluggyEndpoint=url;go();return}
+ const url=String($('#pluggyUrl')?.value||'').trim().replace(/\/+$/,'');
+ const code=$('#pluggyCode')?.value||'';
+ if(!/^https:\/\/[^\s/]+$/i.test(url)||!code){window.pluggyMsg='Informe o endereço HTTPS e o código pessoal de acesso.';window.pluggyEndpoint=url;go();return}
  window.pluggyEndpoint=url;
- window.pluggyBusy=true;
- const b=$("#pluggySync");if(b){b.disabled=true;b.textContent="Buscando receitas..."}
+ window.pluggyBusy=true;const btn=$('#pluggySync');if(btn){btn.disabled=true;btn.textContent='Buscando movimentações...';}
  try{
-  const resp=await fetch(url+"/receitas",{method:"POST",headers:{"Content-Type":"application/json","X-Access-Code":code},body:JSON.stringify({mes:ym}),cache:"no-store"});
-  const out=await resp.json();
-  if(!resp.ok)throw new Error(out.error||"Falha ao consultar o Meu Pluggy.");
-  if(!Array.isArray(out.entradas))throw new Error("Resposta inválida do servidor de integração.");
-  const validas=out.entradas.filter(pluggyValidaEntrada);
-  if(validas.length!==out.entradas.length)throw new Error("O servidor retornou dados inconsistentes. Nenhuma entrada foi registrada.");
-  let novas=0,ignoradas=0,conferir=0;
-  window.pluggyPendentes=[];
-  for(const t of validas){
-   if(pluggyJaExiste(t)){ignoradas++;continue}
-   if(t.revisar){conferir++;window.pluggyPendentes.push(t);continue}
-   S.rec.push({id:uid(),desc:String(t.desc).slice(0,120),valor:Math.round(t.valor*100)/100,data:t.data,cat:CR.includes(t.cat)?t.cat:"Outras receitas",freq:"unica",pm:{[t.data.slice(0,7)]:true},pluggyRef:t.ref});
-   novas++;
-  }
-  if(novas)save();
-  window.pluggyMsg=`${novas} receita(s) nova(s) registrada(s). ${ignoradas} já conhecida(s). ${conferir} movimentação(ões) disponível(is) para conferência, evitando contar transferências próprias como receita.`;
- }catch(err){window.pluggyMsg="Não foi possível sincronizar: "+String(err.message||err)}
- finally{window.pluggyBusy=false;go()}
+   const resp=await fetch(url+'/movimentacoes',{method:'POST',headers:{'Content-Type':'application/json','X-Access-Code':code},body:JSON.stringify({mes:ym}),cache:'no-store'});
+   const out=await resp.json();if(!resp.ok)throw new Error(out.error||'Falha de comunicação com a Pluggy.');
+   if(!Array.isArray(out.movimentacoes)||!Array.isArray(out.contas)||!out.contas.length)throw new Error('Resposta incompleta ou sem contas. Nenhum registro foi alterado.');
+   if(out.movimentacoes.some(t=>!pluggyVal(t))||out.contas.some(c=>typeof c.id!=='string'||(c.saldo!=null&&!Number.isFinite(c.saldo))))throw new Error('Movimentações inconsistentes. Nenhum registro foi alterado.');
+   const refs=new Set();if(out.movimentacoes.some(t=>{if(refs.has(t.ref))return true;refs.add(t.ref);return false}))throw new Error('Referências bancárias duplicadas.');
+   let novas=0,vinculadas=0,conferir=0,existentes=0;
+   window.pluggyPendentes=[];
+   // O snapshot de contas serve para EXIBIR saldo, não para somar com receitas.
+   S.pluggySaldos=out.contas;S.pluggyConsulta=out.consultadoEm||new Date().toISOString();
+   for(const t of out.movimentacoes){
+     if(pluggyExistente(t.ref)){existentes++;continue;}
+     const conc=pluggyConciliar(t);
+     if(conc==='vinculado'){vinculadas++;continue;}
+     if(t.revisar||conc==='revisar'){window.pluggyPendentes.push(t);conferir++;continue;}
+     pluggyAcumular(t);novas++;
+   }
+   save();window.pluggyMsg=`${novas} lançamento(s) novo(s), ${vinculadas} vinculado(s) a registros existentes, ${existentes} já conhecido(s), ${conferir} para conferir. Saldo bancário atualizado conforme os dados disponíveis na Pluggy.`;
+ }catch(err){window.pluggyMsg='Não foi possível sincronizar: '+String(err.message||err);}
+ finally{window.pluggyBusy=false;go();}
 }
 // ---- formulários
 function open_(h){$("#mb").innerHTML=h;$("#m").style.display="flex"}
@@ -208,7 +263,10 @@ const L=S[k];let it=id&&L.find(x=>x.id===id);if(it)Object.assign(it,o);else{it={
 const edit=(k,id)=>add(k,S[k].find(x=>x.id===id));
 function er(t){let e=$("#er");if(!e){e=document.createElement("p");e.id="er";e.style.color="var(--r)";$("#mb").appendChild(e)}e.textContent=t}
 function del(k,id){const it=S[k].find(x=>x.id===id),rc=it&&(it.freq==="mensal"||it.freq==="anual"),B="display:block;width:100%;margin:6px 0;padding:10px";open_(`<h3>Excluir este lançamento?</h3><p class="ex">${E(it.desc||it.nome)}</p>`+(rc?`<button class="btn d" style="${B}" onclick="dl('${k}','${id}',1)">Excluir só deste mês</button>`:"")+`<button class="btn d" style="${B}" onclick="dl('${k}','${id}',0)">${rc?"Excluir em todos os meses":"Sim, excluir"}</button><button class="btn s" style="${B}" onclick="close_()">Cancelar</button>`)}
-function dl(k,id,one){if(one){const it=S[k].find(x=>x.id===id);it.skip=it.skip||{};it.skip[ym]=true}else{if(k==="rec"){const removida=S.rec.find(x=>x.id===id);if(removida?.pluggyRef&&!S.pluggyIgnorados.includes(removida.pluggyRef))S.pluggyIgnorados.push(removida.pluggyRef)}S[k]=S[k].filter(x=>x.id!==id);if(k==="car")S.cmp=S.cmp.filter(x=>x.cid!==id)}save();close_();go()}
+function dl(k,id,one){if(one){const it=S[k].find(x=>x.id===id);it.skip=it.skip||{};it.skip[ym]=true}else{if(k==="rec"||k==="var"){
+ const removida=S[k].find(x=>x.id===id);
+ if(removida?.pluggyRef&&!S.pluggyIgnorados.includes(removida.pluggyRef))S.pluggyIgnorados.push(removida.pluggyRef);
+}S[k]=S[k].filter(x=>x.id!==id);if(k==="car")S.cmp=S.cmp.filter(x=>x.cid!==id)}save();close_();go()}
 function dep(id){const r=S.res.find(x=>x.id===id);r.atual=+r.atual+(+r.contrib||0);save();go()}
 function addAny(){if(F[tab]&&tab!=="car")return add(tab);if(tab==="car")return add("car");open_("<h3>O que deseja adicionar?</h3>"+["rec","fix","var","car","cmp","div","res"].map(k=>`<button class="btn s" style="display:block;width:100%;margin:6px 0;padding:10px" onclick="close_();add('${k}')">${F[k].t}</button>`).join(""))}
 async function exp(){const rows=[["Tipo","Descrição","Valor","Data","Categoria/Detalhe"]];S.rec.forEach(i=>rows.push(["Receita",i.desc,i.valor,D(i.data),i.cat]));S.fix.forEach(i=>rows.push(["Gasto fixo",i.desc,i.valor,D(i.data),i.cat]));S.var.forEach(i=>rows.push(["Gasto variável",i.desc,i.valor,D(i.data),i.cat]));S.cmp.forEach(i=>rows.push(["Compra no cartão",i.desc,i.valor,D(i.data),i.parc+"x"]));S.div.forEach(i=>rows.push(["Dívida",i.nome,i.parcela,D(i.data),i.pagas+"/"+i.total+" pagas"]));S.res.forEach(i=>rows.push(["Reserva",i.nome,i.atual,"","meta "+i.meta]));
