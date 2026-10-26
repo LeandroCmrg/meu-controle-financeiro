@@ -67,6 +67,7 @@ body.auth-locked aside,body.auth-locked main,body.auth-locked nav.bt{display:non
 .login-error{font-size:13px;padding:10px;background:var(--rs);color:var(--r);border-radius:10px;margin-top:12px}
 #loginMessage:empty{display:none}.session-pill{font-size:13px;color:var(--mu);white-space:nowrap}
 @media(max-width:760px){.login-box{padding:22px}.session-pill{display:none}}
+#manageUsersButton[hidden]{display:none!important} main header .btn.s{white-space:nowrap} @media(max-width:760px){main header .btn.s{padding:7px;font-size:12px}}
 </style></head><body class="auth-locked">
 
 <section id="loginScreen" class="login-screen" aria-label="Autenticação do Meu Controle Financeiro">
@@ -74,29 +75,18 @@ body.auth-locked aside,body.auth-locked main,body.auth-locked nav.bt{display:non
   <div class="login-mark">💚</div><h1>Meu Controle Financeiro</h1>
   <p>Entre no seu espaço pessoal. Cada perfil tem lançamentos e conexão bancária separados.</p>
   <form id="loginForm">
-   <label for="loginWho">Quem está entrando?</label>
-   <select id="loginWho" required><option value="leandro">Leandro</option><option value="ray">Ray</option></select>
-   <label for="loginPassword">Senha do seu perfil</label>
-   <input id="loginPassword" type="password" minlength="12" autocomplete="current-password" required placeholder="Sua senha pessoal">
+   <label for="loginWho">Nome de usuário</label>
+   <input id="loginWho" type="text" maxlength="32" minlength="3" autocomplete="username" required placeholder="Digite seu usuário (ex.: Leandro)">
+   <label for="loginPassword">Senha</label>
+   <input id="loginPassword" type="password" autocomplete="current-password" required placeholder="Sua senha pessoal">
    <button class="btn" type="submit" id="loginButton">Entrar no meu controle</button>
   </form>
   <div id="loginMessage" aria-live="polite"></div>
-  <details><summary>Primeira utilização: criar os acessos</summary>
-    <p>O administrador cadastra Leandro e Ray uma única vez. A chave de configuração é definida como segredo no Cloudflare.</p>
-    <form id="setupForm">
-      <label for="setupWho">Criar perfil de</label>
-      <select id="setupWho"><option value="leandro">Leandro</option><option value="ray">Ray</option></select>
-      <label for="setupPassword">Nova senha (mínimo de 12 caracteres)</label>
-      <input id="setupPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" required>
-      <label for="setupKey">Chave de configuração (SETUP_KEY)</label>
-      <input id="setupKey" type="password" autocomplete="off" required>
-      <button type="submit" class="btn s">Criar acesso protegido</button>
-    </form>
-  </details>
+  <p style="font-size:12px;margin-top:17px">Para criar outro usuário, entre como administrador e abra <b>Usuários</b>. Não é necessária uma SETUP_KEY.</p>
  </div>
 </section>
 <aside><h1>💚 Meu Controle Financeiro</h1><div id="sn"></div></aside>
-<main><header><h2 id="ti"></h2><span id="sessionName" class="session-pill"></span><button class="btn s" onclick="logoutUser()" title="Sair do perfil">Sair</button><input type="month" id="ym"><button class="btn" id="mainAdd" onclick="addAny()">+ Adicionar</button></header><div id="v"></div></main>
+<main><header><h2 id="ti"></h2><span id="sessionName" class="session-pill"></span><button class="btn s" onclick="openMyProfile()" title="Alterar meu nome de usuário">Meu perfil</button><button class="btn s" id="manageUsersButton" hidden onclick="openManageUsers()">Usuários</button><button class="btn s" onclick="logoutUser()" title="Sair do perfil">Sair</button><input type="month" id="ym"><button class="btn" id="mainAdd" onclick="addAny()">+ Adicionar</button></header><div id="v"></div></main>
 <nav class="bt" id="bn"></nav><div id="m"><div id="mb"></div></div>
 <script>
 const KEY="mcf_v1"; // Legado local: não será importado automaticamente para a Ray.
@@ -108,7 +98,7 @@ const normalizeS=data=>{
 };
 let S=normalizeS({}); // Somente os dados da conta autenticada são carregados.
 const API_BASE='https://meu-controle-financeiro-api.leandrocmrg001.workers.dev';
-let authToken='',authUser='',stateRevision=0,saveTimer=null,saveInProgress=false,dirty=false,saveConflict=false;
+let authToken='',authUser='',authDisplayName='',authIsAdmin=false,stateRevision=0,saveTimer=null,saveInProgress=false,dirty=false,saveConflict=false;
 const SESSION_KEY='mcf_auth_token';
 async function apiRequest(path,options={}){
  const headers={'Content-Type':'application/json',...(authToken?{'Authorization':'Bearer '+authToken}:{}),...(options.headers||{})};
@@ -125,44 +115,77 @@ async function authActivate(token){
   const me=await apiRequest('/auth/me');
   const stored=await apiRequest('/state');
   S=normalizeS(stored.data);stateRevision=stored.revision||0;
-  authUser=me.user?.login||'';saveConflict=false;dirty=false;
+  authUser=me.user?.login||'';authDisplayName=me.user?.nome||authUser;authIsAdmin=!!me.user?.isAdmin;saveConflict=false;dirty=false;
   sessionStorage.setItem(SESSION_KEY,token);
   document.body.classList.remove('auth-locked');document.getElementById('loginScreen').hidden=true;
-  document.getElementById('sessionName').textContent=me.user?.nome||'';
+  document.getElementById('sessionName').textContent=authDisplayName;document.getElementById('manageUsersButton').hidden=!authIsAdmin;
   window.pluggySessionCode='logado';window.pluggyUltimaConsulta=0;window.pluggyMsg='';
   go();
   // Nunca importa os dados antigos do navegador sem autorização explícita.
-  if(authUser==='leandro')offerLegacyImport();
+  if(authIsAdmin)offerLegacyImport();
   // Os dados bancários podem ter até 24h de atraso na origem.
-  if(me.bankLinks>0||authUser==='leandro')setTimeout(()=>{if(authToken&&!window.pluggyBusy)sincronizarMeuPluggy()},900);
+  if(me.bankLinks>0) setTimeout(()=>{if(authToken&&!window.pluggyBusy)sincronizarMeuPluggy()},900);
  }catch(e){authToken='';sessionStorage.removeItem(SESSION_KEY);throw e;}
 }
 async function performLogin(event){
  event.preventDefault();const btn=document.getElementById('loginButton');btn.disabled=true;
  try{
-  const r=await apiRequest('/auth/login',{method:'POST',body:JSON.stringify({login:document.getElementById('loginWho').value,password:document.getElementById('loginPassword').value})});
+  const r=await apiRequest('/auth/login',{method:'POST',body:JSON.stringify({login:document.getElementById('loginWho').value.trim(),password:document.getElementById('loginPassword').value})});
   document.getElementById('loginPassword').value='';await authActivate(r.token);
  }catch(e){showLoginError(e)}finally{btn.disabled=false;}
 }
-async function performSetup(event){
- event.preventDefault();
+// O administrador cria novos usuários após autenticar-se (sem chave SETUP_KEY).
+const usernameValid = v => /^[\p{L}\p{N}][\p{L}\p{N}._-]{2,31}$/u.test(String(v||'').trim());
+function openManageUsers(){
+ if(!authIsAdmin)return;
+ open_(`<h3>👥 Criar novo usuário</h3><p class="ex">Acesso separado ao D1, sem compartilhar o banco ou registros financeiros de outra pessoa.</p>
+ <label for="newUsername">Nome de usuário</label><input id="newUsername" type="text" minlength="3" maxlength="32" autocomplete="off" placeholder="Ex.: Ray" aria-describedby="userNameHelp">
+ <p id="userNameHelp" class="ex">De 3 a 32 caracteres; letras, números, ponto, hífen ou sublinhado. Sem espaços.</p>
+ <label for="newUserPassword">Senha do novo usuário</label><input id="newUserPassword" type="password" minlength="12" maxlength="128" autocomplete="new-password" placeholder="Mínimo de 12 caracteres">
+ <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap"><button class="btn" id="createUserButton" onclick="createNewUser()">Criar usuário</button><button class="btn s" onclick="close_()">Cancelar</button></div>`);
+}
+async function createNewUser(){
+ const name=document.getElementById('newUsername')?.value.trim()||'';
+ const password=document.getElementById('newUserPassword')?.value||'';
+ if(!usernameValid(name))return er('Use de 3 a 32 caracteres sem espaços.');
+ if(password.length<12)return er('A senha precisa ter pelo menos 12 caracteres.');
+ const btn=document.getElementById('createUserButton');btn.disabled=true;
  try{
-  const r=await apiRequest('/auth/setup',{method:'POST',headers:{'X-Setup-Key':document.getElementById('setupKey').value},body:JSON.stringify({login:document.getElementById('setupWho').value,password:document.getElementById('setupPassword').value})});
-  document.getElementById('setupPassword').value='';document.getElementById('setupKey').value='';await authActivate(r.token);
- }catch(e){showLoginError(e)}
+  await apiRequest('/auth/users',{method:'POST',body:JSON.stringify({login:name,password})});
+  close_();alert('Usuário criado! Agora ele já pode entrar com seu nome e senha.');
+ }catch(e){er(e.message)}finally{btn.disabled=false;}
+}
+function openMyProfile(){
+ open_(`<h3>✏️ Alterar nome de usuário</h3><p class="ex">Seus dados financeiros e conexões continuam vinculados ao mesmo perfil.</p>
+ <label for="profileUsername">Novo nome de usuário</label><input id="profileUsername" type="text" minlength="3" maxlength="32" autocomplete="username" value="${E(authDisplayName)}">
+ <label for="profilePassword">Sua senha atual para confirmar</label><input id="profilePassword" type="password" autocomplete="current-password" placeholder="Senha atual">
+ <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap"><button class="btn" id="renameUserButton" onclick="renameMyUser()">Salvar nome</button><button class="btn s" onclick="close_()">Cancelar</button></div>`);
+}
+async function renameMyUser(){
+ const name=document.getElementById('profileUsername')?.value.trim()||'';
+ const password=document.getElementById('profilePassword')?.value||'';
+ if(!usernameValid(name))return er('Use de 3 a 32 caracteres sem espaços.');
+ if(!password)return er('Digite sua senha atual.');
+ const btn=document.getElementById('renameUserButton');btn.disabled=true;
+ try{
+  const result=await apiRequest('/auth/profile',{method:'PUT',body:JSON.stringify({login:name,password})});
+  authUser=result.user.login;authDisplayName=result.user.nome;
+  document.getElementById('sessionName').textContent=authDisplayName;
+  close_();go();
+ }catch(e){er(e.message)}finally{btn.disabled=false;}
 }
 function offerLegacyImport(){
  if(!localStorage.getItem(KEY)||S.__legacyImported)return;
  let legacy;try{legacy=JSON.parse(localStorage.getItem(KEY));}catch{return;}
  if(!legacy||![...(legacy.rec||[]),...(legacy.fix||[]),...(legacy.var||[])].length)return;
  // Dados antigos permanecem no navegador; o usuário escolhe se quer migrar.
- open_('<h3>Importar dados antigos do Leandro?</h3><p>Encontrei registros da versão anterior neste navegador. Eles NÃO foram incluídos na conta nova. Faça backup antes de importar.</p><button class="btn" onclick="importLegacyForLeandro()">Importar meus dados antigos</button> <button class="btn s" onclick="close_()">Agora não</button>');
+ open_('<h3>Importar registros antigos deste navegador?</h3><p>Encontrei registros da versão anterior neste navegador. Eles NÃO foram incluídos na conta nova. Faça backup antes de importar.</p><button class="btn" onclick="importLegacyForLeandro()">Importar meus dados antigos</button> <button class="btn s" onclick="close_()">Agora não</button>');
 }
 function importLegacyForLeandro(){
- if(authUser!=='leandro'||S.__legacyImported)return;
+ if(!authIsAdmin||S.__legacyImported)return;
  const raw=localStorage.getItem(KEY);let old;
  try{old=normalizeS(JSON.parse(raw));}catch{return;}
- if(!confirm('Confirma que estes registros são do Leandro? O histórico atual do perfil será substituído.'))return;
+ if(!confirm('Confirma que esses registros pertencem a este perfil? O histórico atual será substituído.'))return;
  S=old;S.__legacyImported=true;save();close_();go();
 }
 async function flushSave(){
@@ -182,12 +205,11 @@ async function logoutUser(){
  if(dirty||saveInProgress){clearTimeout(saveTimer);await flushSave();for(let n=0;n<40&&saveInProgress;n++)await new Promise(r=>setTimeout(r,50));}
  if(dirty||saveInProgress||saveConflict){alert('Existem alterações sem salvar. Exporte o backup JSON antes de sair.');return;}
  try{await apiRequest('/auth/logout',{method:'POST'})}catch{}
- authToken='';authUser='';S=normalizeS({});window.pluggySessionCode='';sessionStorage.removeItem(SESSION_KEY);
+ authToken='';authUser='';authDisplayName='';authIsAdmin=false;document.getElementById('manageUsersButton').hidden=true;S=normalizeS({});window.pluggySessionCode='';sessionStorage.removeItem(SESSION_KEY);
  document.body.classList.add('auth-locked');document.getElementById('loginScreen').hidden=false;document.getElementById('loginPassword').value='';
 }
 async function authBoot(){
  document.getElementById('loginForm').addEventListener('submit',performLogin);
- document.getElementById('setupForm').addEventListener('submit',performSetup);
  const token=sessionStorage.getItem(SESSION_KEY);
  if(token){try{await authActivate(token)}catch(e){showLoginError(e);}}
 }
@@ -283,7 +305,7 @@ function pluggySaldosCard(){
  return `<div class="card"><div class="bank-top"><h3>🏦 Saldo atual informado pelo banco</h3><button class="btn s" onclick="pluggyAtualizarAgora()" ${window.pluggyBusy?'disabled':''}>↻ Consultar novamente</button></div><div class="v ${valor<0?'r':'g'}" style="font-size:28px">${R(valor)}</div><div class="ex">Última atualização na Pluggy: ${E(formatar(horario))} · Consultado pelo site: ${E(formatar(consulta))}</div>${validas.map(c=>`<div class="bank-mini"><span>${E(c.nome)}</span><b class="${c.saldo<0?'r':'g'}">${R(c.saldo)}</b></div>`).join('')}<p class="ex">Saldos informados pela instituição. Podem ter atraso de até 24 horas. Não representam saldo histórico do mês ${E(ym)}.</p></div>`;
 }
 function pluggyPanel(){
- return `<p class="rec-hint">A sessão de ${E(authUser==='leandro'?'Leandro':'Ray')} permite consultar apenas os bancos autorizados para este perfil.</p>
+ return `<p class="rec-hint">A sessão de ${E(authDisplayName)} permite consultar apenas os bancos autorizados para este perfil.</p>
  <button class="btn" id="pluggySync" onclick="sincronizarMeuPluggy()" ${window.pluggyBusy?'disabled':''}>↻ ${window.pluggyBusy?'Sincronizando...':'Sincronizar meu banco'}</button>
  <button class="btn s" onclick="pluggyBackup()">⬇ Backup JSON</button>
  ${window.pluggyMsg?`<div class="rec-status" role="status">${E(window.pluggyMsg)}</div>`:''}
