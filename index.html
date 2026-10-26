@@ -63,6 +63,8 @@ let S;try{S=Object.assign(def(),JSON.parse(localStorage.getItem(KEY))||{})}catch
 if(!Array.isArray(S.pluggyIgnorados))S.pluggyIgnorados=[];
 if(!Array.isArray(S.pluggyVinculos))S.pluggyVinculos=[];
 if(!Array.isArray(S.pluggySaldos))S.pluggySaldos=[];
+if(!Array.isArray(S.pluggyNeutros))S.pluggyNeutros=[]; // Transações especiais sem impacto duplicado.
+if(!Array.isArray(S.pluggyAvisos))S.pluggyAvisos=[];
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
 const now=new Date(),loc=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
 let ym=loc(now),tab="dash";const today=loc(now)+"-"+String(now.getDate()).padStart(2,"0");
@@ -96,7 +98,7 @@ const recs=y=>S.rec.filter(i=>ap(i,y)).map(i=>({...i,paid:!!(i.pm&&i.pm[y])}));
 function tot(y){const r=recs(y),b=bills(y),v=S.var.filter(i=>i.data.slice(0,7)===y);
 const rr=sum(r.filter(x=>x.paid)),rp=sum(r.filter(x=>!x.paid)),dp=sum(b.filter(x=>x.paid))+sum(v),dn=sum(b.filter(x=>!x.paid));
 return{r,b,v,rr,rp,dp,dn,saldo:rr-dp,livre:rr+rp-dp-dn,bp:sum(b.filter(x=>x.paid)),bn:dn}}
-function tg(k,id){const y=ym,L={fix:S.fix,fat:S.car,rec:S.rec,div:S.div}[k],it=L.find(x=>x.id===id);it.pm=it.pm||{};const on=!it.pm[y];it.pm[y]=on;if(k==="div")it.pagas=Math.max(0,+it.pagas+(on?1:-1));save();go()}
+function tg(k,id){const y=ym,L={fix:S.fix,fat:S.car,rec:S.rec,div:S.div}[k],it=L.find(x=>x.id===id);if(it.pluggyRef)return;it.pm=it.pm||{};const on=!it.pm[y];it.pm[y]=on;if(k==="div")it.pagas=Math.max(0,+it.pagas+(on?1:-1));save();go()}
 // ---- UI
 const bar=(l,v,max,c,txt)=>`<div class="bl"><span>${E(l)}</span><div class="bar"><i style="width:${max?Math.min(100,Math.max(0,v/max*100)):0}%;background:var(--${c})"></i></div><span>${txt??R(v)}</span></div>`;
 const tip=t=>`<div class="tip">💡 ${t}</div>`;
@@ -109,16 +111,16 @@ const V={
 dash(){const t=tot(ym),dv=S.div.reduce((s,d)=>s+rest(d),0),cat={};t.v.forEach(x=>cat[x.cat]=(cat[x.cat]||0)+ +x.valor);t.b.forEach(x=>cat[x.cat]=(cat[x.cat]||0)+x.valor);const cs=Object.entries(cat).sort((a,b)=>b[1]-a[1]),mx=cs[0]?cs[0][1]:0,mxx=Math.max(t.rr+t.rp,t.dp+t.dn,1);
 const ev=[5,4,3,2,1,0].map(n=>{const y=fm(mi(ym)-n);return[MN[+y.slice(5)-1],tot(y).saldo]}),em=Math.max(...ev.map(e=>Math.abs(e[1])),1);
 const K=(a,b,c,d)=>`<div class="card"><div class="k">${a}</div><div class="v ${c}">${b}</div><div class="k">${d||""}</div></div>`;
-return tip("Resumo dos lançamentos do mês. O saldo bancário do Open Finance é mostrado separadamente e não é somado de novo às receitas.")+pluggySaldosCard()+`<div class="grid">${K("Receitas do mês",R(t.rr+t.rp),"g","Recebido "+R(t.rr)+" · previsto "+R(t.rp))}${K("Gastos do mês",R(t.dp+t.dn),"r","Pago "+R(t.dp)+" · pendente "+R(t.dn))}${K("Dívidas restantes",R(dv),"r")}${K("Contas pendentes",R(t.bn),"y")}${K("Contas pagas",R(t.bp),"g")}${K("Saldo do mês (controle)",R(t.saldo),t.saldo<0?"r":"g","Recebido menos pago no mês")}${K("Sobra estimada do mês",R(t.livre),t.livre<0?"r":"b","Não representa o saldo do banco")}</div>
+return pluggySaldosCard()+tip("Saldo bancário consultado: o valor disponibilizado pela instituição. Receitas e despesas abaixo são movimentos do mês, não devem ser somados novamente ao saldo do banco.")+`<div class="grid">${K("Receitas do mês",R(t.rr+t.rp),"g","Recebido "+R(t.rr)+" · previsto "+R(t.rp))}${K("Gastos do mês",R(t.dp+t.dn),"r","Pago "+R(t.dp)+" · pendente "+R(t.dn))}${K("Dívidas restantes",R(dv),"r")}${K("Contas pendentes",R(t.bn),"y")}${K("Contas pagas",R(t.bp),"g")}${K("Saldo do mês (controle)",R(t.saldo),t.saldo<0?"r":"g","Recebido menos pago no mês")}${K("Sobra estimada do mês",R(t.livre),t.livre<0?"r":"b","Não representa o saldo do banco")}</div>
 <div class="two"><div class="card"><h3>Receitas versus despesas</h3>${bar("Receitas",t.rr+t.rp,mxx,"g")}${bar("Despesas",t.dp+t.dn,mxx,"r")}</div>
 <div class="card"><h3>Gastos por categoria</h3>${cs.length?cs.map(c=>bar(c[0],c[1],mx,"b")).join(""):'<p class="ex">Nenhum gasto neste mês ainda.</p>'}</div>
 <div class="card"><h3>Evolução do saldo (6 meses)</h3>${ev.map(e=>bar(e[0],Math.abs(e[1]),em,e[1]<0?"r":"g",R(e[1]))).join("")}</div>
 <div class="card"><h3>Quitação das dívidas</h3>${S.div.length?S.div.map(d=>bar(d.nome,+d.pagas,+d.total,"g",Math.round(d.pagas/d.total*100||0)+"%")).join(""):'<p class="ex">Cadastre uma dívida para acompanhar.</p>'}</div></div>`},
 rec(){const r=recs(ym),modo=window.recModo||"manual";
 const escolha=`<div class="card"><h3>Como deseja registrar receitas?</h3><div class="rec-options"><button class="btn ${modo==="manual"?"selected":"s"}" onclick="recModo='manual';go()">✍️ Preenchimento manual</button><button class="btn ${modo==="pluggy"?"selected":"s"}" onclick="recModo='pluggy';go()">🔗 Open Finance · Meu Pluggy</button></div>${modo==="manual"?`<p class="ex">Cadastre salário e outras entradas normalmente.</p><button class="btn" onclick="add('rec')">+ Adicionar receita</button>`:pluggyPanel()}</div>`;
-return escolha+`<div class="card"><h3>Receitas de ${ym.slice(5)}/${ym.slice(0,4)}</h3>${r.length?r.map(i=>row(E(i.desc),E(i.cat)+" · "+D(dd(i,ym))+" · "+(i.freq==="mensal"?"mensal":"única")+(i.pluggyRef?" · 🔗 Importado":""),R(i.valor),tgl("rec",i.id,i.paid,"Marcar recebido","Desfazer")+" "+eb("rec",i.id),`<span class="tag ${i.paid?"":"p"}">${i.paid?"Recebido":"Previsto"}</span>`)).join(""):'<p class="ex">Nenhuma receita neste mês.</p>'}</div><div class="grid"><div class="card"><div class="k">Recebido</div><div class="v g">${R(sum(r.filter(x=>x.paid)))}</div></div><div class="card"><div class="k">Previsto</div><div class="v y">${R(sum(r.filter(x=>!x.paid)))}</div></div></div>`},
-fix(){const b=S.fix.filter(i=>ap(i,ym));return tip("Cadastre suas contas para saber quanto do seu salário já está comprometido.")+`<div class="card">${b.length?b.map(i=>{const p=!!(i.pm&&i.pm[ym]);return row(E(i.desc),E(i.cat)+" · vence "+D(dd(i,ym))+" · "+i.freq,R(i.valor),tgl("fix",i.id,p,"Marcar paga","Desfazer")+" "+eb("fix",i.id),`<span class="tag ${p?"":"p"}">${p?"Paga":"Pendente"}</span>`)}).join(""):'<p class="ex">Nenhum gasto fixo neste mês.</p>'}</div><div class="card"><div class="k">Total de gastos fixos do mês</div><div class="v r">${R(sum(b))}</div></div>`},
-var(){const c=window.fc||"";const l=S.var.filter(i=>i.data.slice(0,7)===ym&&(!c||i.cat===c)).sort((a,b)=>b.data.localeCompare(a.data));return tip("Registre aqui os gastos do dia a dia, como mercado e transporte.")+`<div class="card"><select onchange="fc=this.value;go()"><option value="">Todas as categorias</option>${CV.map(x=>`<option ${x===c?"selected":""}>${x}</option>`).join("")}</select>${l.length?l.map(i=>row(E(i.desc),E(i.cat)+" · "+D(i.data)+(i.pluggyRef?" · 🔗 Importado":""),R(i.valor),eb("var",i.id))).join(""):'<p class="ex">Nenhum gasto encontrado.</p>'}</div><div class="card"><div class="k">Total filtrado</div><div class="v r">${R(sum(l))}</div></div>`},
+return escolha+`<div class="card"><h3>Receitas de ${ym.slice(5)}/${ym.slice(0,4)}</h3>${r.length?r.map(i=>row(E(i.desc),E(i.cat)+" · "+D(dd(i,ym))+" · "+(i.freq==="mensal"?"mensal":"única")+(i.pluggyRef?" · 🔗 Importado":""),R(i.valor),(i.pluggyRef?'':tgl("rec",i.id,i.paid,"Marcar recebido","Desfazer")+" ")+eb("rec",i.id),(i.pluggyRef?'':`<span class="tag ${i.paid?"":"p"}">${i.paid?"Recebido":"Previsto"}</span>`))).join(""):'<p class="ex">Nenhuma receita neste mês.</p>'}</div><div class="grid"><div class="card"><div class="k">Recebido</div><div class="v g">${R(sum(r.filter(x=>x.paid)))}</div></div><div class="card"><div class="k">Previsto</div><div class="v y">${R(sum(r.filter(x=>!x.paid)))}</div></div></div>`},
+fix(){const b=S.fix.filter(i=>ap(i,ym));return tip("Cadastre suas contas para saber quanto do seu salário já está comprometido.")+`<div class="card">${b.length?b.map(i=>{const p=!!(i.pm&&i.pm[ym]);return row(E(i.desc),E(i.cat)+" · "+(i.pluggyRef?"Pagamento no banco ":"vence ")+D(dd(i,ym))+" · "+i.freq+(i.pluggyRef?" · 🔗 Importado":""),R(i.valor),(i.pluggyRef?'':tgl("fix",i.id,p,"Marcar paga","Desfazer")+" ")+eb("fix",i.id)+(i.pluggyRef?` <button class="btn s" onclick="pluggyAlterarTipo('fix','${i.id}')">Mover para variáveis</button>`:''),(i.pluggyRef?'':`<span class="tag ${p?"":"p"}">${p?"Paga":"Pendente"}</span>`))}).join(""):'<p class="ex">Nenhum gasto fixo neste mês.</p>'}</div><div class="card"><div class="k">Total de gastos fixos do mês</div><div class="v r">${R(sum(b))}</div></div>`},
+var(){const c=window.fc||"";const l=S.var.filter(i=>i.data.slice(0,7)===ym&&(!c||i.cat===c)).sort((a,b)=>b.data.localeCompare(a.data));return tip("Registre aqui os gastos do dia a dia, como mercado e transporte.")+`<div class="card"><select onchange="fc=this.value;go()"><option value="">Todas as categorias</option>${CV.map(x=>`<option ${x===c?"selected":""}>${x}</option>`).join("")}</select>${l.length?l.map(i=>row(E(i.desc),E(i.cat)+" · "+D(i.data)+(i.pluggyRef?" · 🔗 Importado":""),R(i.valor),eb("var",i.id)+(i.pluggyRef?` <button class="btn s" onclick="pluggyAlterarTipo('var','${i.id}')">Mover para fixos</button>`:''))).join(""):'<p class="ex">Nenhum gasto encontrado.</p>'}</div><div class="card"><div class="k">Total filtrado</div><div class="v r">${R(sum(l))}</div></div>`},
 car(){return tip("Cadastre o cartão e depois suas compras. A fatura é calculada sozinha e pagar a fatura não conta como gasto duplicado.")+(S.car.length?S.car.map(c=>{const f=fat(c),cur=f[mi(ym)]||0,pg=!!(c.pm&&c.pm[ym]),usado=Object.keys(f).filter(m=>!(c.pm&&c.pm[fm(+m)])).reduce((s,m)=>s+f[m],0);return`<div class="card"><b>💳 ${E(c.nome)}</b> <small class="k">${E(c.banco)}</small><div class="grid" style="margin-top:8px"><div><div class="k">Limite</div><b>${R(c.limite)}</b></div><div><div class="k">Disponível</div><b class="${c.limite-usado<0?"r":"g"}">${R(c.limite-usado)}</b></div><div><div class="k">Fatura de ${ym.slice(5)}/${ym.slice(0,4)}</div><b class="r">${R(cur)}</b></div><div><div class="k">Fecha dia ${c.fech} · vence dia ${c.venc}</div></div></div>${cur>0?tgl("fat",c.id,pg,"Registrar pagamento da fatura","Desfazer pagamento")+" ":""}${eb("car",c.id)}${S.cmp.filter(p=>p.cid===c.id).map(p=>{const n=+p.parc||1,r=Object.keys(fat({...c,id:"x"})).length;const cl=mi(p.data.slice(0,7))+(+p.data.slice(8,10)>c.fech?1:0)+(c.venc<=c.fech?1:0),fut=Math.max(0,Math.min(n,cl+n-mi(ym)));return row(E(p.desc),D(p.data)+" · "+n+"x de "+R(p.valor/n)+" · "+fut+" parcela(s) a vencer",R(p.valor),eb("cmp",p.id))}).join("")}</div>`}).join(""):'<div class="card"><p class="ex">Nenhum cartão cadastrado.</p></div>')+(S.car.length?`<button class="btn" onclick="add('cmp')">+ Nova compra no cartão</button>`:"")},
 div(){const dv=S.div,or=sum(dv.map(d=>({valor:d.orig}))),rs=dv.reduce((s,d)=>s+rest(d),0),mn=dv.reduce((s,d)=>s+(+d.pagas<+d.total?+d.parcela:0),0);return tip("Cadastre cada dívida. Ao pagar uma parcela, o valor restante e o progresso se atualizam sozinhos.")+`<div class="grid"><div class="card"><div class="k">Total de dívidas</div><div class="v">${R(or)}</div></div><div class="card"><div class="k">Já pago</div><div class="v g">${R(Math.max(0,or-rs))}</div></div><div class="card"><div class="k">Restante</div><div class="v r">${R(rs)}</div></div><div class="card"><div class="k">Parcelas por mês</div><div class="v y">${R(mn)}</div></div></div>`+dv.map(d=>{const p=Math.round(d.pagas/d.total*100)||0;return`<div class="card"><b>${E(d.nome)}</b> <small class="k">${E(d.inst)}${d.juros?" · juros "+d.juros+"% ao mês":""}</small><div class="k">Parcela ${R(d.parcela)} · ${d.pagas}/${d.total} pagas · restam ${R(rest(d))} · vence dia ${+d.data.slice(8,10)}</div>${bar("Progresso",p,100,"g",p+"%")}${eb("div",d.id)}</div>`}).join("")||'<div class="card"><p class="ex">Nenhuma dívida cadastrada. Que bom!</p></div>'},
 pag(){const b=bills(ym).sort((a,c)=>a.due.localeCompare(c.due)),G=[["Vencidas","v",x=>!x.paid&&x.due<today],["Vencem hoje","p",x=>!x.paid&&x.due===today],["Próximos vencimentos","",x=>!x.paid&&x.due>today],["Pagas","",x=>x.paid]];return tip("Marque uma conta como paga para atualizar seu saldo.")+G.map(g=>{const l=b.filter(g[2]);return`<div class="card"><h3>${g[0]} (${l.length}) · ${R(sum(l))}</h3>${l.length?l.map(x=>row(E(x.desc),"Vence em "+D(x.due),R(x.valor),tgl(x.k,x.id,x.paid,"Marcar como paga","Desfazer"),`<span class="tag ${x.paid?"":g[1]||"p"}">${x.paid?"Paga":g[0]==="Vencidas"?"Vencida":"A pagar"}</span>`)).join(""):'<p class="ex">Nada aqui.</p>'}</div>`}).join("")},
@@ -132,25 +134,35 @@ window.pluggyEndpoint='https://meu-controle-financeiro-api.leandrocmrg001.worker
 window.pluggyMsg='';
 window.pluggyPendentes=[];
 window.pluggyBusy=false;
+window.pluggySessionCode="";
+window.pluggyUltimaConsulta=0;
 const pluggyNorm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 const pluggyVal=t=>t && typeof t.ref==='string' && /^[\w:-]{1,200}$/.test(t.ref) && /^20\d{2}-\d{2}-\d{2}$/.test(t.data)
   && ['entrada','saida'].includes(t.tipo) && Number.isFinite(t.valor) && t.valor>0 && typeof t.desc==='string' && t.desc.length>0;
 function pluggySaldosCard(){
- if(!S.pluggySaldos?.length)return '';
+ if(!S.pluggySaldos?.length)return `<div class="card"><h3>🏦 Saldo da conta conectada</h3><p class="ex">Conecte o Meu Pluggy na aba Receitas para consultar o último saldo bancário disponível.</p><button class="btn s" onclick="tab='rec';recModo='pluggy';go()">Conectar / atualizar banco</button></div>`;
  const validas=S.pluggySaldos.filter(c=>c.moeda==='BRL'&&Number.isFinite(c.saldo));
- const valor=validas.reduce((a,c)=>a+c.saldo,0), atualizado=S.pluggyConsulta||'';
- return `<div class="card"><h3>🏦 Saldo informado pelo banco (Open Finance)</h3><div class="v ${valor<0?'r':'g'}">${R(valor)}</div><small class="ex">Última consulta ao Pluggy: ${E(atualizado?new Date(atualizado).toLocaleString('pt-BR'):'não informada')}. Atualização do banco não é instantânea. Este valor é uma fotografia atual, não o saldo histórico do mês selecionado.</small>${validas.map(c=>`<div class="bank-mini"><span>${E(c.nome)}</span><b class="${c.saldo<0?'r':'g'}">${R(c.saldo)}</b></div>`).join('')}<p class="ex">Não somamos este saldo ao resultado dos lançamentos, evitando contar o mesmo dinheiro duas vezes.</p></div>`;
+ if(!validas.length)return '<div class="card"><h3>🏦 Saldo bancário</h3><p class="ex">O banco não forneceu um saldo válido nesta consulta.</p></div>';
+ const valor=validas.reduce((a,c)=>a+c.saldo,0);
+ const horario=S.pluggyAtualizadoEm||'';
+ const consulta=S.pluggyConsulta||'';
+ const formatar=x=>x&&!Number.isNaN(new Date(x).getTime())?new Date(x).toLocaleString('pt-BR'):'não informada';
+ return `<div class="card"><div class="bank-top"><h3>🏦 Saldo atual informado pelo banco</h3><button class="btn s" onclick="pluggyAtualizarAgora()" ${window.pluggyBusy?'disabled':''}>↻ Consultar novamente</button></div><div class="v ${valor<0?'r':'g'}" style="font-size:28px">${R(valor)}</div><div class="ex">Última atualização na Pluggy: ${E(formatar(horario))} · Consultado pelo site: ${E(formatar(consulta))}</div>${validas.map(c=>`<div class="bank-mini"><span>${E(c.nome)}</span><b class="${c.saldo<0?'r':'g'}">${R(c.saldo)}</b></div>`).join('')}<p class="ex">Saldos informados pela instituição. Podem ter atraso de até 24 horas. Não representam saldo histórico do mês ${E(ym)}.</p></div>`;
 }
 function pluggyPanel(){
- return `<div class="rec-hint">Sincroniza os lançamentos confirmados de suas contas bancárias (não as compras em cartão de crédito). O saldo real do banco é mostrado separadamente, sem substituir os lançamentos do controle.</div>
+ return `<div class="rec-hint">Receitas e gastos confirmados são enviados automaticamente para as abas corretas. Compras no crédito não são importadas como débitos bancários. Categorias podem ser corrigidas depois.</div>
  <div class="rec-field"><label for="pluggyUrl">Endereço do serviço seguro (Cloudflare)</label><input id="pluggyUrl" type="url" value="${E(window.pluggyEndpoint)}" autocomplete="url"></div>
- <div class="rec-field"><label for="pluggyCode">Código pessoal de acesso</label><input id="pluggyCode" type="password" placeholder="Senha configurada no Cloudflare" autocomplete="off"></div>
- <button class="btn" id="pluggySync" onclick="sincronizarMeuPluggy()" ${window.pluggyBusy?'disabled':''}>🔄 ${window.pluggyBusy?'Sincronizando...':'Sincronizar entradas, saídas e saldo'}</button>
- <button class="btn s" onclick="pluggyBackup()">⬇ Backup dos lançamentos (JSON)</button>
+ <div class="rec-field"><label for="pluggyCode">Código pessoal de acesso</label><input id="pluggyCode" type="password" placeholder="${window.pluggySessionCode?'Conectado nesta sessão — código guardado apenas na memória':'Senha configurada no Cloudflare'}" autocomplete="off"></div>
+ <button class="btn" id="pluggySync" onclick="sincronizarMeuPluggy()" ${window.pluggyBusy?'disabled':''}>↻ ${window.pluggyBusy?'Sincronizando...':'Sincronizar receitas, gastos e saldo'}</button>
+ <button class="btn s" onclick="pluggyBackup()">⬇ Fazer backup JSON</button>
  ${window.pluggyMsg?`<div class="rec-status" role="status">${E(window.pluggyMsg)}</div>`:''}
  ${pluggySaldosCard()}
- ${window.pluggyPendentes.length?`<div class="card"><h3>⚠️ Movimentações para conferir</h3><p class="ex">Transferências próprias, pagamentos de fatura e outros movimentos ambíguos ficam aqui. Não entram nos resultados sem decisão.</p>${window.pluggyPendentes.map(t=>`<div class="row"><div class="i"><b>${E(t.desc)}</b><small>${D(t.data)} · ${E(t.banco)} · ${E(t.motivo||'Conferir classificação')}</small></div><b class="${t.tipo==='saida'?'r':'g'}">${t.tipo==='saida'?'-':'+'}${R(t.valor)}</b><button class="btn s" onclick="pluggyConfirmar('${t.ref}')">Registrar</button><button class="btn s" onclick="pluggyIgnorar('${t.ref}')">Já registrado / ignorar</button></div>`).join('')}</div>`:''}
- <p class="rec-hint">As despesas importadas ficam em Gastos variáveis e podem ser editadas. Itens já conciliados não são recriados. Nenhuma senha bancária é solicitada aqui e o código de acesso não é armazenado.</p>`;
+ ${S.pluggyAvisos.length?`<div class="card"><h3>ℹ️ Movimentações especiais para conferir</h3><p class="ex">Esses itens não são somados novamente como renda ou despesa por serem possíveis transferências, aplicações ou pagamentos de fatura. Caso seja um gasto real, você pode reclassificá-lo.</p>${S.pluggyAvisos.slice(-20).reverse().map(t=>`<div class="row"><div class="i"><b>${E(t.desc)}</b><small>${E(t.data)} · ${E(t.motivo||'Verificar natureza do movimento')}</small></div><b>${R(t.valor)}</b><button class="btn s" onclick="pluggyReclassificarEspecial('${E(t.ref)}')">Corrigir tipo</button></div>`).join('')}</div>`:''}
+ <p class="rec-hint">A sincronização lê os dados já disponíveis na Pluggy; não força o banco a atualizar na hora. O código de acesso permanece apenas na memória até fechar esta página.</p>`;
+}
+function pluggyAtualizarAgora(){
+ if(!window.pluggySessionCode){tab='rec';recModo='pluggy';window.pluggyMsg='Digite seu código pessoal de acesso para consultar o banco.';go();return;}
+ sincronizarMeuPluggy();
 }
 function pluggyBackup(){
  const txt=JSON.stringify({geradoEm:new Date().toISOString(),chave:KEY,dados:S},null,2);
@@ -159,7 +171,8 @@ function pluggyBackup(){
 }
 function pluggyExistente(ref){
  return S.pluggyIgnorados.includes(ref) || S.pluggyVinculos.includes(ref)
- || S.rec.some(i=>i.pluggyRef===ref) || S.var.some(i=>i.pluggyRef===ref);
+ || S.rec.some(i=>i.pluggyRef===ref) || S.var.some(i=>i.pluggyRef===ref)
+ || S.fix.some(i=>i.pluggyRef===ref) || S.pluggyNeutros.some(i=>i.ref===ref);
 }
 function pluggyComparar(t,desc,data,valor){
  if(Math.abs(Number(valor)-t.valor)>0.009 || !/^\d{4}-\d{2}-\d{2}$/.test(data||''))return false;
@@ -169,9 +182,74 @@ function pluggyComparar(t,desc,data,valor){
  const b=pluggyNorm(desc).replace(/^(?:pix|pagamento|compra)\s+/,'');
  return !!(a.length>=4&&b.length>=4&&(a.includes(b)||b.includes(a)));
 }
+// Classificação por evidências da descrição. Uma única conta paga NÃO comprova recorrência.
+// Por isso, contas fixas bancárias entram como pagamentos únicos; novos meses são importados separadamente.
+const PLUGGY_REGRAS_FIXAS=[
+ [/\b(aluguel|locacao|condominio|prestacao imovel)\b/,"Aluguel"],
+ [/\b(sabesp|conta de agua|saneamento|sanesul|copasa)\b/,"Água"],
+ [/\b(enel|cpfl|energisa|equatorial|cemig|conta de luz|energia eletrica)\b/,"Energia"],
+ [/\b(vivo fibra|claro net|tim internet|internet fibra|banda larga)\b/,"Internet"],
+ [/\b(telefone fixo|conta telefone|plano celular|telefonia)\b/,"Telefone"],
+ [/\b(netflix|spotify|disney|hbo|amazon prime|assinatura|mensalidade streaming)\b/,"Assinatura"],
+ [/\b(escola|faculdade|curso mensal|mensalidade)\b/,"Mensalidade"],
+ [/\b(seguro auto|seguro vida|seguradora)\b/,"Seguro"]
+];
+function pluggyClassificarFixo(t){
+ const n=pluggyNorm(t.desc);
+ for(const [regex,cat] of PLUGGY_REGRAS_FIXAS)if(regex.test(n))return cat;
+ return null;
+}
 function pluggyAcumular(t){
- if(t.tipo==='entrada')S.rec.push({id:uid(),desc:t.desc.slice(0,120),valor:t.valor,data:t.data,cat:CR.includes(t.cat)?t.cat:'Outras receitas',freq:'unica',pm:{[t.data.slice(0,7)]:true},pluggyRef:t.ref});
- else S.var.push({id:uid(),desc:t.desc.slice(0,120),valor:t.valor,data:t.data,cat:CV.includes(t.cat)?t.cat:'Outros',pm:{},pluggyRef:t.ref});
+ const mes=t.data.slice(0,7);
+ if(t.tipo==='entrada'){
+   S.rec.push({id:uid(),desc:t.desc.slice(0,120),valor:t.valor,data:t.data,cat:CR.includes(t.cat)?t.cat:'Outras receitas',freq:'unica',pm:{[mes]:true},pluggyRef:t.ref});
+ }else{
+   const fixa=pluggyClassificarFixo(t);
+   if(fixa){
+     S.fix.push({id:uid(),desc:t.desc.slice(0,120),valor:t.valor,data:t.data,cat:fixa,freq:'unica',pm:{[mes]:true},pluggyRef:t.ref});
+   }else{
+     S.var.push({id:uid(),desc:t.desc.slice(0,120),valor:t.valor,data:t.data,cat:CV.includes(t.cat)?t.cat:'Outros',pm:{},pluggyRef:t.ref});
+   }
+ }
+}
+// Migração prudente: move somente importações antigas classificadas genericamente como "Outros".
+// Lançamentos editados com categoria específica ficam como estão.
+function pluggyMigrarAntigos(){
+ if(S.pluggyClassificacaoMigrada)return 0;
+ let total=0;
+ for(const it of [...S.var]){
+   if(!it.pluggyRef||it.cat!=='Outros')continue;
+   const cat=pluggyClassificarFixo(it);
+   if(!cat)continue;
+   S.var=S.var.filter(x=>x.id!==it.id);
+   S.fix.push({id:it.id,desc:it.desc,valor:it.valor,data:it.data,cat,freq:'unica',pm:{[it.data.slice(0,7)]:true},pluggyRef:it.pluggyRef});
+   total++;
+ }
+ S.pluggyClassificacaoMigrada=true;
+ return total;
+}
+function pluggyAlterarTipo(k,id){
+ const origem=S[k],i=origem?.find(x=>x.id===id);
+ if(!i||!i.pluggyRef)return;
+ if(k==='fix'){
+   S.fix=S.fix.filter(x=>x.id!==id);
+   S.var.push({id:i.id,desc:i.desc,valor:i.valor,data:i.data,cat:CV.includes(i.cat)?i.cat:'Outros',pluggyRef:i.pluggyRef,pm:{}});
+ }else{
+   S.var=S.var.filter(x=>x.id!==id);
+   const mes=i.data.slice(0,7);
+   S.fix.push({id:i.id,desc:i.desc,valor:i.valor,data:i.data,cat:CF.includes(i.cat)?i.cat:'Outra fixa',freq:'unica',pluggyRef:i.pluggyRef,pm:{[mes]:true}});
+ }
+ save();go();
+}
+function pluggyReclassificarEspecial(ref){
+ const t=S.pluggyAvisos.find(x=>x.ref===ref);if(!t)return;
+ open_(`<h3>Como classificar esta movimentação?</h3><p class="ex">${E(t.desc)} · ${E(t.data)} · ${R(t.valor)}</p><p class="ex">Escolha apenas se tiver certeza de que é um recebimento ou pagamento real. O saldo do banco não será modificado.</p><button class="btn" onclick="pluggyAplicarEspecial('${E(ref)}')">Tratar como ${t.tipo==='entrada'?'receita':'despesa'}</button> <button class="btn s" onclick="close_()">Cancelar</button>`);
+}
+function pluggyAplicarEspecial(ref){
+ const t=S.pluggyAvisos.find(x=>x.ref===ref);if(!t)return;
+ S.pluggyAvisos=S.pluggyAvisos.filter(x=>x.ref!==ref);
+ S.pluggyNeutros=S.pluggyNeutros.filter(x=>x.ref!==ref);
+ pluggyAcumular(t);save();close_();go();
 }
 // Reconciliação conservadora. Só vincula automaticamente quando há UMA correspondência clara.
 // Faturas e despesas já cadastradas não são lançadas uma segunda vez.
@@ -208,23 +286,13 @@ function pluggyConciliar(t){
  }
  return '';
 }
-function pluggyConfirmar(ref){
- const t=window.pluggyPendentes.find(x=>x.ref===ref);if(!t||pluggyExistente(t.ref))return;
- pluggyAcumular(t);window.pluggyPendentes=window.pluggyPendentes.filter(x=>x.ref!==ref);
- window.pluggyMsg='Movimentação registrada. É possível editá-la normalmente.';save();go();
-}
-function pluggyIgnorar(ref){
- if(!window.pluggyPendentes.some(x=>x.ref===ref))return;
- if(!S.pluggyIgnorados.includes(ref))S.pluggyIgnorados.push(ref);
- window.pluggyPendentes=window.pluggyPendentes.filter(x=>x.ref!==ref);
- window.pluggyMsg='Movimentação não importada. Não aparecerá novamente nas próximas sincronizações.';save();go();
-}
 async function sincronizarMeuPluggy(){
  if(window.pluggyBusy)return;
- const url=String($('#pluggyUrl')?.value||'').trim().replace(/\/+$/,'');
- const code=$('#pluggyCode')?.value||'';
- if(!/^https:\/\/[^\s/]+$/i.test(url)||!code){window.pluggyMsg='Informe o endereço HTTPS e o código pessoal de acesso.';window.pluggyEndpoint=url;go();return}
+ const url=String($('#pluggyUrl')?.value||window.pluggyEndpoint||'').trim().replace(/\/+$/,'');
+ const code=$('#pluggyCode')?.value||window.pluggySessionCode||'';
+ if(!/^https:\/\/[a-z0-9-]+\.leandrocmrg001\.workers\.dev$/i.test(url)||!code){window.pluggyMsg='Informe o endereço HTTPS e o código pessoal de acesso.';window.pluggyEndpoint=url;go();return}
  window.pluggyEndpoint=url;
+ window.pluggySessionCode=code;
  window.pluggyBusy=true;const btn=$('#pluggySync');if(btn){btn.disabled=true;btn.textContent='Buscando movimentações...';}
  try{
    const resp=await fetch(url+'/movimentacoes',{method:'POST',headers:{'Content-Type':'application/json','X-Access-Code':code},body:JSON.stringify({mes:ym}),cache:'no-store'});
@@ -232,20 +300,28 @@ async function sincronizarMeuPluggy(){
    if(!Array.isArray(out.movimentacoes)||!Array.isArray(out.contas)||!out.contas.length)throw new Error('Resposta incompleta ou sem contas. Nenhum registro foi alterado.');
    if(out.movimentacoes.some(t=>!pluggyVal(t))||out.contas.some(c=>typeof c.id!=='string'||(c.saldo!=null&&!Number.isFinite(c.saldo))))throw new Error('Movimentações inconsistentes. Nenhum registro foi alterado.');
    const refs=new Set();if(out.movimentacoes.some(t=>{if(refs.has(t.ref))return true;refs.add(t.ref);return false}))throw new Error('Referências bancárias duplicadas.');
-   let novas=0,vinculadas=0,conferir=0,existentes=0;
-   window.pluggyPendentes=[];
+   let novas=0,vinculadas=0,especiais=0,existentes=0;
    // O snapshot de contas serve para EXIBIR saldo, não para somar com receitas.
    S.pluggySaldos=out.contas;S.pluggyConsulta=out.consultadoEm||new Date().toISOString();
+   S.pluggyAtualizadoEm=out.ultimaAtualizacaoBanco||S.pluggyAtualizadoEm||null;
    for(const t of out.movimentacoes){
      if(pluggyExistente(t.ref)){existentes++;continue;}
      const conc=pluggyConciliar(t);
      if(conc==='vinculado'){vinculadas++;continue;}
-     if(t.revisar||conc==='revisar'){window.pluggyPendentes.push(t);conferir++;continue;}
+     // Movimentações com natureza reconhecidamente não-operacional não geram renda/despesa.
+     // Faturas não conciliadas também ficam isoladas para evitar dupla contagem.
+     if(['transferencia_propria','aplicacao','fatura'].includes(t.natureza)||conc==='revisar'){
+       S.pluggyNeutros.push({ref:t.ref});
+       S.pluggyAvisos.push(t);especiais++;continue;
+     }
+     // PIX de terceiros e compras convencionais são importados automaticamente.
      pluggyAcumular(t);novas++;
    }
-   save();window.pluggyMsg=`${novas} lançamento(s) novo(s), ${vinculadas} vinculado(s) a registros existentes, ${existentes} já conhecido(s), ${conferir} para conferir. Saldo bancário atualizado conforme os dados disponíveis na Pluggy.`;
+   const reorganizados=pluggyMigrarAntigos();save();window.pluggyUltimaConsulta=Date.now();window.pluggyMsg=`${novas} novo(s), ${vinculadas} conciliado(s), ${existentes} sem alteração, ${especiais} movimento(s) especial(is), ${reorganizados} importação(ões) antiga(s) reorganizada(s). Saldo consultado; veja a data da última atualização do banco.`;
  }catch(err){window.pluggyMsg='Não foi possível sincronizar: '+String(err.message||err);}
- finally{window.pluggyBusy=false;go();}
+ finally{window.pluggyBusy=false;
+window.pluggySessionCode="";
+window.pluggyUltimaConsulta=0;go();}
 }
 // ---- formulários
 function open_(h){$("#mb").innerHTML=h;$("#m").style.display="flex"}
@@ -263,7 +339,7 @@ const L=S[k];let it=id&&L.find(x=>x.id===id);if(it)Object.assign(it,o);else{it={
 const edit=(k,id)=>add(k,S[k].find(x=>x.id===id));
 function er(t){let e=$("#er");if(!e){e=document.createElement("p");e.id="er";e.style.color="var(--r)";$("#mb").appendChild(e)}e.textContent=t}
 function del(k,id){const it=S[k].find(x=>x.id===id),rc=it&&(it.freq==="mensal"||it.freq==="anual"),B="display:block;width:100%;margin:6px 0;padding:10px";open_(`<h3>Excluir este lançamento?</h3><p class="ex">${E(it.desc||it.nome)}</p>`+(rc?`<button class="btn d" style="${B}" onclick="dl('${k}','${id}',1)">Excluir só deste mês</button>`:"")+`<button class="btn d" style="${B}" onclick="dl('${k}','${id}',0)">${rc?"Excluir em todos os meses":"Sim, excluir"}</button><button class="btn s" style="${B}" onclick="close_()">Cancelar</button>`)}
-function dl(k,id,one){if(one){const it=S[k].find(x=>x.id===id);it.skip=it.skip||{};it.skip[ym]=true}else{if(k==="rec"||k==="var"){
+function dl(k,id,one){if(one){const it=S[k].find(x=>x.id===id);it.skip=it.skip||{};it.skip[ym]=true}else{if(k==="rec"||k==="var"||k==="fix"){
  const removida=S[k].find(x=>x.id===id);
  if(removida?.pluggyRef&&!S.pluggyIgnorados.includes(removida.pluggyRef))S.pluggyIgnorados.push(removida.pluggyRef);
 }S[k]=S[k].filter(x=>x.id!==id);if(k==="car")S.cmp=S.cmp.filter(x=>x.cid!==id)}save();close_();go()}
@@ -273,5 +349,9 @@ async function exp(){const rows=[["Tipo","Descrição","Valor","Data","Categoria
 const csv="\ufeff"+rows.map(r=>r.map(c=>'"'+String(c??"").replace(/"/g,'""')+'"').join(";")).join("\n");try{const d=await claude.use("downloads");if(!d)return alert("Download indisponível aqui.");await d.save({filename:"meu-controle-financeiro.csv",data:csv})}catch(e){}}
 $("#ym").onchange=e=>{if(e.target.value){ym=e.target.value;go()}};
 $("#m").onclick=e=>{if(e.target.id==="m")close_()};
+// Atualiza a consulta ao retornar para a janela (não força atualização na instituição).
+window.addEventListener('focus',()=>{
+ if(window.pluggySessionCode&&!window.pluggyBusy&&window.pluggyUltimaConsulta&&Date.now()-window.pluggyUltimaConsulta>10*60*1000)sincronizarMeuPluggy();
+});
 go();
 </script></body></html>
