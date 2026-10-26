@@ -119,7 +119,9 @@ async function authActivate(token){
   sessionStorage.setItem(SESSION_KEY,token);
   document.body.classList.remove('auth-locked');document.getElementById('loginScreen').hidden=true;
   document.getElementById('sessionName').textContent=authDisplayName;document.getElementById('manageUsersButton').hidden=!authIsAdmin;
-  window.pluggySessionCode='logado';window.pluggyUltimaConsulta=0;window.pluggyMsg='';
+  window.pluggySessionCode='logado';window.pluggyUltimaConsulta=0;
+window.pluggyConnections=[];
+window.pluggyConnecting=false;window.pluggyMsg='';
   go();
   // Nunca importa os dados antigos do navegador sem autorização explícita.
   if(authIsAdmin)offerLegacyImport();
@@ -205,7 +207,7 @@ async function logoutUser(){
  if(dirty||saveInProgress){clearTimeout(saveTimer);await flushSave();for(let n=0;n<40&&saveInProgress;n++)await new Promise(r=>setTimeout(r,50));}
  if(dirty||saveInProgress||saveConflict){alert('Existem alterações sem salvar. Exporte o backup JSON antes de sair.');return;}
  try{await apiRequest('/auth/logout',{method:'POST'})}catch{}
- authToken='';authUser='';authDisplayName='';authIsAdmin=false;document.getElementById('manageUsersButton').hidden=true;S=normalizeS({});window.pluggySessionCode='';sessionStorage.removeItem(SESSION_KEY);
+ authToken='';authUser='';authDisplayName='';authIsAdmin=false;document.getElementById('manageUsersButton').hidden=true;S=normalizeS({});window.pluggySessionCode='';window.pluggyConnections=[];sessionStorage.removeItem(SESSION_KEY);
  document.body.classList.add('auth-locked');document.getElementById('loginScreen').hidden=false;document.getElementById('loginPassword').value='';
 }
 async function authBoot(){
@@ -306,12 +308,58 @@ function pluggySaldosCard(){
 }
 function pluggyPanel(){
  return `<p class="rec-hint">A sessão de ${E(authDisplayName)} permite consultar apenas os bancos autorizados para este perfil.</p>
- <button class="btn" id="pluggySync" onclick="sincronizarMeuPluggy()" ${window.pluggyBusy?'disabled':''}>↻ ${window.pluggyBusy?'Sincronizando...':'Sincronizar meu banco'}</button>
+ <button class="btn" id="pluggyConnect" onclick="pluggyConectarBanco()" ${window.pluggyConnecting?'disabled':''}>🏦 ${window.pluggyConnecting?'Abrindo...':'Conectar banco'}</button>
+ <button class="btn s" id="pluggySync" onclick="sincronizarMeuPluggy()" ${window.pluggyBusy?'disabled':''}>↻ ${window.pluggyBusy?'Sincronizando...':'Sincronizar meu banco'}</button>
+ <p class="rec-hint">Conexões autorizadas neste perfil: <b>${(window.pluggyConnections||[]).length}</b>. Cada titular precisa autorizar seus próprios bancos na Pluggy.</p>
  <button class="btn s" onclick="pluggyBackup()">⬇ Backup JSON</button>
  ${window.pluggyMsg?`<div class="rec-status" role="status">${E(window.pluggyMsg)}</div>`:''}
  ${pluggySaldosCard()}
  ${S.pluggyAvisos.length?`<div class="card"><h3>ℹ️ Movimentações para conferir</h3><p class="ex">Transferências, aplicações e faturas não entram como gastos duplicados.</p>${S.pluggyAvisos.slice(-20).reverse().map(t=>`<div class="row"><div class="i"><b>${E(t.desc)}</b><small>${E(t.data)} · ${E(t.motivo||'Verificar natureza')}</small></div><b>${R(t.valor)}</b><button class="btn s" onclick="pluggyReclassificarEspecial('${E(t.ref)}')">Reclassificar</button></div>`).join('')}</div>`:''}
  <p class="rec-hint">O site consulta a Pluggy sem pedir uma segunda senha. O banco pode atualizar a conexão com atraso, normalmente cerca de 24 horas.</p>`;
+}
+// Pluggy Connect oficial (token fornecido somente ao perfil autenticado pelo backend).
+function pluggySdk() {
+ if(typeof window.PluggyConnect==='function')return Promise.resolve();
+ if(window.pluggySdkPromise)return window.pluggySdkPromise;
+ window.pluggySdkPromise=new Promise((resolve,reject)=>{
+  const s=document.createElement('script');
+  // Versão fixa publicada no CDN oficial Pluggy para HTML vanilla.
+  s.src='https://cdn.pluggy.ai/pluggy-connect/v2.8.2/pluggy-connect.js';
+  s.async=true;
+  s.onload=()=>typeof window.PluggyConnect==='function'?resolve():reject(new Error('SDK Pluggy indisponível.'));
+  s.onerror=()=>reject(new Error('O navegador não conseguiu carregar a janela Pluggy.'));
+  document.head.appendChild(s);
+ }).catch(err=>{window.pluggySdkPromise=null;throw err});
+ return window.pluggySdkPromise;
+}
+async function pluggyConectarBanco(){
+ if(!authToken || window.pluggyConnecting)return;
+ window.pluggyConnecting=true;
+ window.pluggyMsg='Preparando uma conexão segura...';go();
+ try{
+  const loggedToken=authToken;
+  const out=await apiRequest('/pluggy/connect-token',{method:'POST',body:'{}'});
+  await pluggySdk();
+  const widget=new window.PluggyConnect({
+   connectToken:out.connectToken,
+   includeSandbox:false,
+   onSuccess:async ({item})=>{
+    try{
+     if(!authToken||loggedToken!==authToken)throw new Error('A sessão mudou. Entre novamente.');
+     if(!item?.id)throw new Error('A Pluggy não retornou a referência da conexão.');
+     await apiRequest('/pluggy/connections',{method:'POST',body:JSON.stringify({itemId:item.id})});
+     const linked=await apiRequest('/pluggy/connections');
+     window.pluggyConnections=linked.items||[];
+     window.pluggyMsg='Banco conectado ao seu perfil! Você pode sincronizar agora.';
+     if(authToken)await sincronizarMeuPluggy();
+    }catch(e){window.pluggyMsg='Conexão não confirmada: '+e.message;go();}
+   },
+   onError:({message})=>{window.pluggyMsg='A conexão não foi concluída: '+String(message||'verifique a autorização no banco.');go();}
+  });
+  widget.init();
+  window.pluggyMsg='Conclua a autorização na janela oficial da Pluggy.';
+ }catch(err){window.pluggyMsg='Não foi possível conectar: '+err.message;}
+ finally{window.pluggyConnecting=false;go();}
 }
 function pluggyAtualizarAgora(){sincronizarMeuPluggy();}
 function pluggyBackup(){
